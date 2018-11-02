@@ -1,4 +1,4 @@
-{-# language DeriveFunctor #-}
+{-# language GADTs #-}
 {-# language RankNTypes #-}
 {-# language ScopedTypeVariables #-}
 module Task where
@@ -10,102 +10,146 @@ import qualified Data.Dependent.Map as DMap
 import Data.Functor.Compose
 
 import Hashed
-import VerifyingTraces(VT)
-import qualified VerifyingTraces as VT
+import Traces(Traces)
+import qualified Traces
 
-data Env k v = Env
-  { tasks :: !(Tasks k v)
-  , tasksStartedVar :: !(MVar (DMap k (Compose MVar v)))
-  , taskTracesVar :: !(MVar (VT k v))
-  }
-
-newtype Task k v a = Task { unTask :: Env k v -> IO a }
-  deriving (Functor)
+data Task k v a where
+  Pure :: a -> Task k v a
+  Need :: k i -> Task k v a -> Task k v a
+  Fetch :: k i -> (v i -> Task k v b) -> Task k v b
+  Effect :: IO a -> (a -> Task k v b) -> Task k v b
 
 type Tasks k v = forall i. k i -> Task k v (v i)
 
-runTask :: GCompare k => Tasks k v -> VT k v -> Task k v a -> IO (a, VT k v)
-runTask ts traces task = do
-  tracesVar <- newMVar traces
-  startedVar <- newMVar mempty
-  a <- unTask task Env
-    { tasks = ts
-    , tasksStartedVar = startedVar
-    , taskTracesVar = tracesVar
-    }
-  traces' <- readMVar tracesVar
-  return (a, traces')
+mapFetch :: (forall i. k i -> Task k v' (v i)) -> Task k v a -> Task k v' a
+mapFetch _ (Pure a) = Pure a
+mapFetch f (Need key t) = Need key (mapFetch f t)
+mapFetch f (Fetch key k) = do
+  value <- f key
+  mapFetch f $ k value
+mapFetch f (Effect io k) = Effect io (mapFetch f <$> k)
 
-build :: (GCompare k, HashTag k v) => Tasks k v -> VT k v -> k i -> IO (v i, VT k v)
-build ts traces key = runTask ts traces $ fetch key
+instance Functor (Task k v) where
+  fmap f (Pure a) = Pure $ f a
+  fmap f (Need key t) = Need key (f <$> t)
+  fmap f (Fetch key k) = Fetch key (fmap f <$> k)
+  fmap f (Effect io k) = Effect io (fmap f <$> k)
 
 instance Applicative (Task k v) where
-  pure = Task . pure . pure
-  Task f <*> Task x = Task $ (<*>) <$> f <*> x
+  pure = Pure
+  Pure f <*> t = f <$> t
+  t <*> Pure a = ($ a) <$> t
+  Need key t1 <*> t2 = Need key (t1 <*> t2)
+  t1 <*> Need key t2 = Need key (t1 <*> t2)
+  Effect io k <*> t = Effect io (\a -> k a <*> t)
+  t <*> Effect io k = Effect io (\a -> t <*> k a)
+  Fetch key1 k1 <*> Fetch key2 k2 = Need key2 $ Fetch key1 (\a -> k1 a <*> Fetch key2 k2)
 
 instance Monad (Task k v) where
-  Task ma >>= f = Task $ \env -> do
-    a <- ma env
-    unTask (f a) env
+  Pure a >>= f = f a
+  Need key t1 >>= f = Need key (t1 >>= f)
+  Fetch key k >>= f = Fetch key (k >=> f)
+  Effect io k >>= f = Effect io (k >=> f)
+  (>>) = (*>)
 
 instance MonadIO (Task k v) where
-  liftIO = Task . const
+  liftIO io = Effect io pure
+
+runTask :: Tasks k v -> Task k v a -> IO a
+runTask tasks task = case task of
+  Pure a -> pure a
+  Need key t -> do
+    _ <- forkIO $ runTask tasks $ void $ fetch key
+    runTask tasks t
+  Fetch key k -> do
+    a <- runTask tasks $ tasks key
+    runTask tasks $ k a
+  Effect io k -> do
+    a <- io
+    runTask tasks $ k a
+
+fetch :: k i -> Task k v (v i)
+fetch key = Fetch key pure
+
+need :: k i -> Task k v ()
+need key = Need key $ pure ()
+
+fetchHashed :: HashTag k v => k i -> Task k v (Hashed v i)
+fetchHashed key = hashed key <$> fetch key
 
 track :: forall k v a. GCompare k => Task k v a -> Task k v (a, DMap k v)
-track (Task task) = Task $ \env -> do
-  depsVar <- newMVar mempty
+track task = do
+  depsVar <- liftIO $ newMVar mempty
   let
-    tasks' :: forall i. k i -> Task k v (v i)
-    tasks' k = Task $ \_env -> do
-      v <- unTask (tasks env k) env
-      modifyMVar_ depsVar $ pure . DMap.insert k v
-      return v
-  a <- task env { tasks = tasks' }
-  deps <- readMVar depsVar
-  return (a, deps)
-
-fetchAsync :: (HashTag k v, GCompare k) => k i -> Task k v (Task k v (v i))
-fetchAsync key = Task $ \env -> do
-  var <- newEmptyMVar
-  _ <- forkIO $ do
-    value <- unTask (fetch key) env
-    putMVar var value
-  return $ liftIO $ readMVar var
-
-fetch :: (HashTag k v, GCompare k) => k i -> Task k v (v i)
-fetch key = Task $ \env -> do
-  putText "fetching"
-  let
-    fromScratch = do
-      putText "fromScratch"
-      (value, deps) <- unTask (track $ tasks env key) env
-      putText $ "deps " <> show (DMap.size deps)
-      modifyMVar_ (taskTracesVar env)
-        $ pure
-        . VT.record key value deps
+    go :: k i -> Task k v (v i)
+    go key = do
+      value <- fetch key
+      liftIO $ modifyMVar_ depsVar $ pure . DMap.insert key value
       return value
+  result <- mapFetch go task
+  deps <- liftIO $ readMVar depsVar
+  return (result, deps)
 
-    fetchHash k = hashed k <$> unTask (fetch k) env
-
-    checkDeps = do
-      taskTraces <- readMVar $ taskTracesVar env
-      case DMap.lookup key taskTraces of
-        Nothing -> fromScratch
-        Just oldValueDeps -> do
-          upToDate <- VT.verifyDependencies (VT.dependencies oldValueDeps) fetchHash
-          if upToDate then
-            return $ unhashed $ VT.value oldValueDeps
-          else
-            fromScratch
-
-  join $ modifyMVar (tasksStartedVar env) $ \tasksStarted ->
-    case DMap.lookup key tasksStarted of
+dedup :: GCompare k => MVar (DMap k (Compose MVar v)) -> Tasks k v -> Tasks k v
+dedup startedVar tasks key =
+  join $ liftIO $ modifyMVar startedVar $ \started ->
+    case DMap.lookup key started of
       Nothing -> do
         valueVar <- newEmptyMVar
         let k = do
-              value <- checkDeps
-              putMVar valueVar value
+              value <- tasks key
+              liftIO $ putMVar valueVar value
               return value
-        return (DMap.insert key (Compose valueVar) tasksStarted, k)
+        return (DMap.insert key (Compose valueVar) started, k)
       Just (Compose valueVar) ->
-        return (tasksStarted, readMVar valueVar)
+        return (started, liftIO $ readMVar valueVar)
+
+data Verifier k v t = Verifier
+  { verifyKey :: forall i. k i -> t -> Task k v (Maybe (v i))
+  , recordValue :: forall i. k i -> v i -> DMap k v -> t -> t
+  }
+
+traceVerifier :: (GCompare k, HashTag k v) => Verifier k v (Traces k v)
+traceVerifier = Verifier
+  { verifyKey = \key traces ->
+    case DMap.lookup key traces of
+      Nothing -> return Nothing
+      Just oldValueDeps ->
+        Traces.verifyDependencies fetchHashed oldValueDeps
+  , recordValue = Traces.record
+  }
+
+verify
+  :: GCompare k
+  => Verifier k v t
+  -> MVar t
+  -> Tasks k v
+  -> Tasks k v
+verify verifier verifierVar tasks key = do
+  vt <- liftIO $ readMVar verifierVar
+  maybeValue <- verifyKey verifier key vt
+  case maybeValue of
+    Nothing -> do
+      (value, deps) <- track $ tasks key
+      liftIO $ modifyMVar_ verifierVar
+        $ pure
+        . recordValue verifier key value deps
+      return value
+    Just value -> return value
+
+build
+  :: forall k v i
+  . (GCompare k, HashTag k v)
+  => Tasks k v
+  -> Traces k v
+  -> k i
+  -> IO (v i, Traces k v)
+build tasks traces key = do
+  tracesVar <- newMVar traces
+  startedVar <- newMVar mempty
+  let
+    vtTasks :: Tasks k v
+    vtTasks = verify traceVerifier tracesVar $ dedup startedVar tasks
+  value <- runTask vtTasks (fetch key)
+  traces' <- readMVar tracesVar
+  return (value, traces')

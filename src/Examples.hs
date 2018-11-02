@@ -118,30 +118,27 @@ sheetTasks :: SheetTasks
 sheetTasks key = do
   liftIO $ putText $ "computing " <> Protolude.show key
   case key of
-    A -> pure $ Identity 10
+    A -> pure 10
     B -> do
-      Identity a <- fetch A
-      pure $ Identity $ a + 20
+      a <- fetch A
+      pure $ a + 20
     C -> do
-      Identity a <- fetch A
-      pure $ Identity $ a + 30
+      a <- fetch A
+      pure $ a + 30
     D -> do
-      Identity b <- fetch B
-      Identity c <- fetch C
-      pure $ Identity $ b + c
+      b <- fetch B
+      c <- fetch C
+      pure $ b + c
 
 sheetTasks2 :: SheetTasks
 sheetTasks2 key = do
   liftIO $ putText $ "computing 2 " <> Protolude.show key
   case key of
-    A -> pure $ Identity 12
+    A -> pure 12
     B -> do
-      Identity a <- fetch A
-      pure $ Identity $ a + 10
+      a <- fetch A
+      pure $ a + 10
     C -> do
-      Identity a <- fetch A
-      pure $ Identity $ a + 20
-    D -> do
-      Identity b <- fetch B
-      Identity c <- fetch C
-      pure $ Identity $ b + c
+      a <- fetch A
+      pure $ a + 20
+    D -> (+) <$> fetch B <*> fetch C

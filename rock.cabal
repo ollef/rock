@@ -29,7 +29,7 @@ library
                        Examples
                        Hashed
                        Task
-                       VerifyingTraces
+                       Traces
   build-depends:       base >= 4.7 && < 5
                      , dependent-map
                      , dependent-sum

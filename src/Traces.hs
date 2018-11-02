@@ -2,7 +2,7 @@
 {-# language MultiParamTypeClasses #-}
 {-# language RankNTypes #-}
 {-# language StandaloneDeriving #-}
-module VerifyingTraces where
+module Traces where
 
 import Protolude
 
@@ -25,17 +25,20 @@ instance (GShow k, ShowTag k v) => ShowTag k (ValueDeps k v) where
   showTaggedPrec k d (ValueDeps v deps) = showParen (d > 10)
     $ showString "ValueDeps " . showTaggedPrec k 11 v . showString " " . showsPrec 11 deps
 
-type VT k v = DMap k (ValueDeps k v)
+type Traces k v = DMap k (ValueDeps k v)
 
 verifyDependencies
   :: Monad m
-  => DMap k (Hashed v)
-  -> (forall i'. k i' -> m (Hashed v i'))
-  -> m Bool
-verifyDependencies deps fetchHash =
-  allM (DMap.toList deps) $ \(depKey :=> depValue) -> do
+  => (forall i'. k i' -> m (Hashed v i'))
+  -> ValueDeps k v i
+  -> m (Maybe (v i))
+verifyDependencies fetchHash (ValueDeps hashedValue deps) = do
+  upToDate <- allM (DMap.toList deps) $ \(depKey :=> depValue) -> do
     depValue' <- fetchHash depKey
     return $ hash depValue == hash depValue'
+  return $ if upToDate
+    then Just $ unhashed hashedValue
+    else Nothing
   where
     allM :: Monad m => [a] -> (a -> m Bool) -> m Bool
     allM [] _ = return True
@@ -51,8 +54,8 @@ record
   => k i
   -> v i
   -> DMap k v
-  -> VT k v
-  -> VT k v
+  -> Traces k v
+  -> Traces k v
 record k v deps
   = DMap.insert k
   $ ValueDeps (hashed k v)
