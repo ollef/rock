@@ -90,17 +90,19 @@ track task = do
   deps <- liftIO $ readMVar depsVar
   return (result, deps)
 
-dedup :: GCompare k => MVar (DMap k (Compose MVar v)) -> Tasks k v -> Tasks k v
-dedup startedVar tasks key =
+memoise :: GCompare k => MVar (DMap k (Compose MVar v)) -> Tasks k v -> Tasks k v
+memoise startedVar tasks key =
   join $ liftIO $ modifyMVar startedVar $ \started ->
     case DMap.lookup key started of
       Nothing -> do
         valueVar <- newEmptyMVar
-        let k = do
-              value <- tasks key
-              liftIO $ putMVar valueVar value
-              return value
-        return (DMap.insert key (Compose valueVar) started, k)
+        return
+          ( DMap.insert key (Compose valueVar) started
+          , do
+            value <- tasks key
+            liftIO $ putMVar valueVar value
+            return value
+          )
       Just (Compose valueVar) ->
         return (started, liftIO $ readMVar valueVar)
 
@@ -149,7 +151,7 @@ build tasks traces key = do
   startedVar <- newMVar mempty
   let
     vtTasks :: Tasks k v
-    vtTasks = verify traceVerifier tracesVar $ dedup startedVar tasks
+    vtTasks = memoise startedVar $ verify traceVerifier tracesVar tasks
   value <- runTask vtTasks (fetch key)
   traces' <- readMVar tracesVar
   return (value, traces')
