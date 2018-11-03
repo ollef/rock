@@ -74,9 +74,6 @@ fetch key = Fetch key pure
 need :: k i -> Task k v ()
 need key = Need key $ pure ()
 
-fetchHashed :: HashTag k v => k i -> Task k v (Hashed v i)
-fetchHashed key = hashed key <$> fetch key
-
 track :: forall k v a. GCompare k => Task k v a -> Task k v (a, DMap k v)
 track task = do
   depsVar <- liftIO $ newMVar mempty
@@ -119,7 +116,9 @@ traceVerifier = Verifier
       Just oldValueDeps ->
         Traces.verifyDependencies fetchHashed oldValueDeps
   , recordValue = Traces.record
-  }
+  } where
+    fetchHashed :: HashTag k v => k i -> Task k v (Hashed v i)
+    fetchHashed key = hashed key <$> fetch key
 
 verify
   :: GCompare k
