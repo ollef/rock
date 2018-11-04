@@ -2,6 +2,7 @@
 {-# language GADTs #-}
 {-# language RankNTypes #-}
 {-# language ScopedTypeVariables #-}
+{-# language StandaloneDeriving #-}
 module Task where
 
 import Protolude
@@ -14,84 +15,132 @@ import Hashed
 import Traces(Traces)
 import qualified Traces
 
-data Task k v a where
-  Pure :: a -> Task k v a
-  Need :: k i -> Task k v a -> Task k v a
-  Fetch :: k i -> (v i -> Task k v b) -> Task k v b
-  Effect :: IO a -> (a -> Task k v b) -> Task k v b
+-------------------------------------------------------------------------------
+-- Types
+
+type Rules k v = forall i. k i -> Rule k v (v i)
 
 data Rule k v a
   = Input (IO a)
   | Task (Task k v a)
   deriving Functor
 
-type Rules k v = forall i. k i -> Rule k v (v i)
+newtype Task k v a = MkTask { unTask :: IO (Result k v a) }
+  deriving Functor
 
-mapFetch :: (forall i. k i -> Task k v' (v i)) -> Task k v a -> Task k v' a
-mapFetch _ (Pure a) = Pure a
-mapFetch f (Need key t) = Need key (mapFetch f t)
-mapFetch f (Fetch key k) = do
-  value <- f key
-  mapFetch f $ k value
-mapFetch f (Effect io k) = Effect io (mapFetch f <$> k)
+data Result k v a
+  = Done a
+  | Blocked !(BlockedTask k v a)
+  deriving Functor
 
-instance Functor (Task k v) where
-  fmap f (Pure a) = Pure $ f a
-  fmap f (Need key t) = Need key (f <$> t)
-  fmap f (Fetch key k) = Fetch key (fmap f <$> k)
-  fmap f (Effect io k) = Effect io (fmap f <$> k)
+data BlockedTask k v a where
+  BlockedTask :: Block k v a -> (a -> Task k v b) -> BlockedTask k v b
+
+data Block k v a where
+  Fetch :: k i -> Block k v (v i)
+  Fork :: !(BlockedTask k v (a -> b)) -> !(BlockedTask k v a) -> Block k v b
+
+-------------------------------------------------------------------------------
+-- Instances
 
 instance Applicative (Task k v) where
-  pure = Pure
-  Pure f <*> t = f <$> t
-  t <*> Pure a = ($ a) <$> t
-  Need key t1 <*> t2 = Need key (t1 <*> t2)
-  t1 <*> Need key t2 = Need key (t1 <*> t2)
-  Effect io k <*> t = Effect io (\a -> k a <*> t)
-  t <*> Effect io k = Effect io (\a -> t <*> k a)
-  Fetch key1 k1 <*> Fetch key2 k2 = Need key2 $ Fetch key1 (\a -> k1 a <*> Fetch key2 k2)
+  pure = MkTask . pure . Done
+  MkTask mrf <*> MkTask mrx = MkTask $ (<*>) <$> mrf <*> mrx
 
 instance Monad (Task k v) where
-  Pure a >>= f = f a
-  Need key t1 >>= f = Need key (t1 >>= f)
-  Fetch key k >>= f = Fetch key (k >=> f)
-  Effect io k >>= f = Effect io (k >=> f)
   (>>) = (*>)
+  MkTask ma >>= f = MkTask $ do
+    ra <- ma
+    case ra of
+      Done a -> unTask $ f a
+      Blocked (BlockedTask b k) -> return $ Blocked $ BlockedTask b $ k >=> f
 
 instance MonadIO (Task k v) where
-  liftIO io = Effect io pure
+  liftIO io = MkTask $ pure <$> io
 
-runTask :: Rules k v -> Task k v a -> IO a
-runTask rules task = case task of
-  Pure a -> pure a
-  Need key t -> do
-    _ <- forkIO $ runTask rules $ void $ fetch key
-    runTask rules t
-  Fetch key k -> do
-    a <- case rules key of
-      Input io -> io
-      Task t -> runTask rules t
-    runTask rules $ k a
-  Effect io k -> do
-    a <- io
-    runTask rules $ k a
+instance Applicative (Result k v) where
+  pure = Done
+  Done f <*> Done x = Done $ f x
+  Done f <*> Blocked b = Blocked $ f <$> b
+  Blocked b <*> Done x = Blocked $ ($ x) <$> b
+  Blocked b1 <*> Blocked b2 = Blocked $ BlockedTask (Fork b1 b2) pure
+
+instance Monad (Result k v) where
+  (>>) = (*>)
+  Done x >>= f = f x
+  Blocked (BlockedTask b t) >>= f = Blocked $ BlockedTask b $ t >=> MkTask . pure . f
+
+deriving instance Functor (BlockedTask k v)
+
+-------------------------------------------------------------------------------
+
+afterFetch
+  :: (forall i. k i -> v' i -> Task k v' (v i))
+  -> Task k v a
+  -> Task k v' a
+afterFetch f task = MkTask $ do
+  result <- unTask task
+  case result of
+    Done a -> return $ Done a
+    Blocked b -> return $ Blocked $ afterFetchBT f b
+
+afterFetchBT
+  :: (forall i. k i -> v' i -> Task k v' (v i))
+  -> BlockedTask k v a
+  -> BlockedTask k v' a
+afterFetchBT f (BlockedTask b t) = case afterFetchB f b of
+  BlockedTask b' t' -> BlockedTask b' $ t' >=> afterFetch f <$> t
+
+afterFetchB
+  :: (forall i. k i -> v' i -> Task k v' (v i))
+  -> Block k v a
+  -> BlockedTask k v' a
+afterFetchB f (Fetch k) = BlockedTask (Fetch k) (f k)
+afterFetchB f (Fork b1 b2) = BlockedTask (Fork (afterFetchBT f b1) (afterFetchBT f b2)) pure
+
+-------------------------------------------------------------------------------
 
 fetch :: k i -> Task k v (v i)
-fetch key = Fetch key pure
+fetch key = MkTask $ pure $ Blocked $ BlockedTask (Fetch key) pure
 
-need :: k i -> Task k v ()
-need key = Need key $ pure ()
+-------------------------------------------------------------------------------
+
+runTask :: Rules k v -> Task k v a -> IO a
+runTask rules task = do
+  result <- unTask task
+  case result of
+    Done a -> return a
+    Blocked b -> runBT rules b
+
+runBT :: Rules k v -> BlockedTask k v a -> IO a
+runBT rules (BlockedTask b f) = do
+  a <- runB rules b
+  runTask rules $ f a
+
+runB :: Rules k v -> Block k v a -> IO a
+runB rules (Fetch key) = case rules key of
+  Input io -> io
+  Task t -> runTask rules t
+runB rules (Fork bf bx) = do
+  fVar <- newEmptyMVar
+  void $ forkIO $ do
+    f <- runBT rules bf
+    putMVar fVar f
+  x <- runBT rules bx
+  f <- takeMVar fVar
+  return $ f x
+
+-------------------------------------------------------------------------------
 
 track :: forall k v a. GCompare k => Task k v a -> Task k v (a, DMap k v)
 track task = do
   depsVar <- liftIO $ newMVar mempty
   let
-    go :: k i -> Task k v (v i)
-    go key = do
-      value <- fetch key
+    record :: k i -> v i -> Task k v (v i)
+    record key value = do
       liftIO $ modifyMVar_ depsVar $ pure . DMap.insert key value
       return value
-  result <- mapFetch go task
+  result <- afterFetch record task
   deps <- liftIO $ readMVar depsVar
   return (result, deps)
 
