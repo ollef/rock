@@ -55,11 +55,11 @@ instance HashTag TaskKey Identity where
   hashTagged ParseModule {} = hash
 
 type CompilerTask = Task TaskKey Identity
-type CompilerTasks = Tasks TaskKey Identity
+type CompilerRules = Rules TaskKey Identity
 
-compilerTasks :: CompilerTasks
-compilerTasks (ParseModuleHeader mname) = Identity <$> parseModuleHeader mname
-compilerTasks (ParseModule mname) = Identity <$> parseModule mname
+compilerRules :: CompilerRules
+compilerRules (ParseModuleHeader mname) = Task $ Identity <$> parseModuleHeader mname
+compilerRules (ParseModule mname) = Task $ Identity <$> parseModule mname
 
 parseModuleHeader :: ModuleName -> CompilerTask (ModuleHeader, Text)
 parseModuleHeader mname = pure (ModuleHeader mname, "")
@@ -112,10 +112,10 @@ instance ShowTag SheetKey Identity where
   showTaggedPrec D = showsPrec
 
 type SheetTask = Task SheetKey Identity
-type SheetTasks = Tasks SheetKey Identity
+type SheetRules = Rules SheetKey Identity
 
-sheetTasks :: SheetTasks
-sheetTasks key = do
+sheetRules :: SheetRules
+sheetRules key = Task $ do
   liftIO $ putText $ "computing " <> Protolude.show key
   case key of
     A -> pure 10
@@ -130,8 +130,8 @@ sheetTasks key = do
       c <- fetch C
       pure $ b + c
 
-sheetTasks2 :: SheetTasks
-sheetTasks2 key = do
+sheetRules2 :: SheetRules
+sheetRules2 key = Task $ do
   liftIO $ putText $ "computing 2 " <> Protolude.show key
   case key of
     A -> pure 12
