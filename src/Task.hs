@@ -121,14 +121,11 @@ runB :: Rules k v -> Block k v a -> IO a
 runB rules (Fetch key) = case rules key of
   Input io -> io
   Task t -> runTask rules t
-runB rules (Fork bf bx) = do
-  fVar <- newEmptyMVar
-  void $ forkIO $ do
-    f <- runBT rules bf
-    putMVar fVar f
-  x <- runBT rules bx
-  f <- takeMVar fVar
-  return $ f x
+runB rules (Fork bf bx) =
+  withAsync (runBT rules bf) $ \af -> do
+    x <- runBT rules bx
+    f <- wait af
+    return $ f x
 
 -------------------------------------------------------------------------------
 
