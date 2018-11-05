@@ -74,29 +74,30 @@ deriving instance Functor (BlockedTask k v)
 
 -------------------------------------------------------------------------------
 
-afterFetch
-  :: (forall i. k i -> v' i -> Task k v' (v i))
+transFetch
+  :: (forall i. k i -> Task k' v' (v i))
   -> Task k v a
-  -> Task k v' a
-afterFetch f task = MkTask $ do
+  -> Task k' v' a
+transFetch f task = MkTask $ do
   result <- unTask task
   case result of
     Done a -> return $ Done a
-    Blocked b -> return $ Blocked $ afterFetchBT f b
+    Blocked b -> unTask $ transFetchBT f b
 
-afterFetchBT
-  :: (forall i. k i -> v' i -> Task k v' (v i))
+transFetchBT
+  :: (forall i. k i -> Task k' v' (v i))
   -> BlockedTask k v a
-  -> BlockedTask k v' a
-afterFetchBT f (BlockedTask b t) = case afterFetchB f b of
-  BlockedTask b' t' -> BlockedTask b' $ t' >=> afterFetch f <$> t
+  -> Task k' v' a
+transFetchBT f (BlockedTask b t) = do
+  a <- transFetchB f b
+  transFetch f $ t a
 
-afterFetchB
-  :: (forall i. k i -> v' i -> Task k v' (v i))
+transFetchB
+  :: (forall i. k i -> Task k' v' (v i))
   -> Block k v a
-  -> BlockedTask k v' a
-afterFetchB f (Fetch k) = BlockedTask (Fetch k) (f k)
-afterFetchB f (Fork b1 b2) = BlockedTask (Fork (afterFetchBT f b1) (afterFetchBT f b2)) pure
+  -> Task k' v' a
+transFetchB f (Fetch k) = f k
+transFetchB f (Fork b1 b2) = transFetchBT f b1 <*> transFetchBT f b2
 
 -------------------------------------------------------------------------------
 
@@ -133,11 +134,12 @@ track :: forall k v a. GCompare k => Task k v a -> Task k v (a, DMap k v)
 track task = do
   depsVar <- liftIO $ newMVar mempty
   let
-    record :: k i -> v i -> Task k v (v i)
-    record key value = do
+    record :: k i -> Task k v (v i)
+    record key = do
+      value <- fetch key
       liftIO $ modifyMVar_ depsVar $ pure . DMap.insert key value
       return value
-  result <- afterFetch record task
+  result <- transFetch record task
   deps <- liftIO $ readMVar depsVar
   return (result, deps)
 
