@@ -1,4 +1,5 @@
 {-# language DeriveGeneric #-}
+{-# language FlexibleInstances #-}
 {-# language GADTs #-}
 {-# language MultiParamTypeClasses #-}
 {-# language RankNTypes #-}
@@ -8,6 +9,7 @@ module Examples where
 import Protolude
 
 import Data.Dependent.Sum
+import Data.Functor.Classes
 import Data.GADT.Compare
 import Data.GADT.Show
 import Text.Show
@@ -50,23 +52,23 @@ instance GCompare TaskKey where
 
 deriving instance Show (TaskKey a)
 
-instance HashTag TaskKey Identity where
+instance HashTag TaskKey where
   hashTagged ParseModuleHeader {} = hash
   hashTagged ParseModule {} = hash
 
-type CompilerTask = Task TaskKey Identity
-type CompilerRules = Rules TaskKey Identity
+type CompilerTask = Task TaskKey
+type CompilerRules = Rules TaskKey
 
 compilerRules :: CompilerRules
-compilerRules (ParseModuleHeader mname) = Task $ Identity <$> parseModuleHeader mname
-compilerRules (ParseModule mname) = Task $ Identity <$> parseModule mname
+compilerRules (ParseModuleHeader mname) = Task $ parseModuleHeader mname
+compilerRules (ParseModule mname) = Task $ parseModule mname
 
 parseModuleHeader :: ModuleName -> CompilerTask (ModuleHeader, Text)
 parseModuleHeader mname = pure (ModuleHeader mname, "")
 
 parseModule :: ModuleName -> CompilerTask ParsedModule
 parseModule mname = do
-  Identity (header, _t) <- fetch (ParseModuleHeader mname)
+  (header, _t) <- fetch (ParseModuleHeader mname)
   pure $ ParsedModule header
 
 -------------------------------------------------------------------------------
@@ -96,7 +98,7 @@ instance GCompare SheetKey where
 
 deriving instance Show (SheetKey a)
 
-instance HashTag SheetKey Identity where
+instance HashTag SheetKey where
   hashTagged A = hash
   hashTagged B = hash
   hashTagged C = hash
@@ -105,14 +107,14 @@ instance HashTag SheetKey Identity where
 instance GShow SheetKey where
   gshowsPrec = showsPrec
 
-instance ShowTag SheetKey Identity where
-  showTaggedPrec A = showsPrec
-  showTaggedPrec B = showsPrec
-  showTaggedPrec C = showsPrec
-  showTaggedPrec D = showsPrec
+instance Show1 g => ShowTag SheetKey g where
+  showTaggedPrec A = showsPrec1
+  showTaggedPrec B = showsPrec1
+  showTaggedPrec C = showsPrec1
+  showTaggedPrec D = showsPrec1
 
-type SheetTask = Task SheetKey Identity
-type SheetRules = Rules SheetKey Identity
+type SheetTask = Task SheetKey
+type SheetRules = Rules SheetKey
 
 sheetRules :: SheetRules
 sheetRules key = Task $ do

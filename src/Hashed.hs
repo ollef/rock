@@ -1,35 +1,31 @@
-{-# language FlexibleContexts #-}
-{-# language FlexibleInstances #-}
-{-# language MultiParamTypeClasses #-}
 module Hashed(Hashed, hashed, unhashed, HashTag(hashTagged)) where
 
 import Protolude
 
+import Data.Functor.Classes
 import Text.Show
 
-import Data.Dependent.Sum
+class HashTag k where
+  hashTagged :: k a -> a -> Int
 
-class HashTag k v where
-  hashTagged :: k i -> v i -> Int
-
-data Hashed v i = Hashed !(v i) !Int
+data Hashed a = Hashed !a !Int
   deriving (Show)
 
-instance Eq (v i) => Eq (Hashed v i) where
+instance Eq a => Eq (Hashed a) where
   Hashed v1 h1 == Hashed v2 h2 = h1 == h2 && v1 == v2
 
-instance Ord (v i) => Ord (Hashed v i) where
+instance Ord a => Ord (Hashed a) where
   compare (Hashed v1 _) (Hashed v2 _) = compare v1 v2
 
-instance Hashable (Hashed v i) where
+instance Show1 Hashed where
+  liftShowsPrec showa _ d (Hashed a _) = showParen (d > 10)
+    $ showString "Hashed " . showa 11 a
+
+instance Hashable (Hashed a) where
   hashWithSalt s (Hashed _ h) = hashWithSalt s h
 
-instance ShowTag k v => ShowTag k (Hashed v) where
-  showTaggedPrec k d (Hashed v _) = showParen (d > 10)
-    $ showString "Hashed " . showTaggedPrec k 11 v
-
-unhashed :: Hashed v i -> v i
+unhashed :: Hashed a -> a
 unhashed (Hashed x _) = x
 
-hashed :: HashTag k v => k i -> v i -> Hashed v i
+hashed :: HashTag f => f a -> a -> Hashed a
 hashed k v = Hashed v $ hashTagged k v

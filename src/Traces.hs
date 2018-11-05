@@ -1,7 +1,7 @@
-{-# language FlexibleInstances #-}
-{-# language MultiParamTypeClasses #-}
 {-# language RankNTypes #-}
 {-# language StandaloneDeriving #-}
+{-# language TemplateHaskell #-}
+{-# language UndecidableInstances #-}
 module Traces where
 
 import Protolude
@@ -9,29 +9,30 @@ import Protolude
 import Data.Dependent.Map(DMap, GCompare, DSum((:=>)))
 import qualified Data.Dependent.Map as DMap
 import Data.Dependent.Sum
-import Data.GADT.Show
-import Text.Show
+import Data.Functor.Classes
+import Text.Show.Deriving
 
 import Hashed
 
-data ValueDeps k v i = ValueDeps
-  { value :: !(Hashed v i)
-  , dependencies :: !(DMap k (Hashed v))
+data ValueDeps f a = ValueDeps
+  { value :: !(Hashed a)
+  , dependencies :: !(DMap f Hashed)
   }
 
-deriving instance (ShowTag k v, Show (v i)) => Show (ValueDeps k v i)
+return []
 
-instance (GShow k, ShowTag k v) => ShowTag k (ValueDeps k v) where
-  showTaggedPrec k d (ValueDeps v deps) = showParen (d > 10)
-    $ showString "ValueDeps " . showTaggedPrec k 11 v . showString " " . showsPrec 11 deps
+deriving instance (Show a, ShowTag f Hashed) => Show (ValueDeps f a)
 
-type Traces k v = DMap k (ValueDeps k v)
+instance ShowTag f Hashed => Show1 (ValueDeps f) where
+  liftShowsPrec = $(makeLiftShowsPrec ''ValueDeps)
+
+type Traces f = DMap f (ValueDeps f)
 
 verifyDependencies
   :: Monad m
-  => (forall i'. k i' -> m (Hashed v i'))
-  -> ValueDeps k v i
-  -> m (Maybe (v i))
+  => (forall a'. f a' -> m (Hashed a'))
+  -> ValueDeps f a
+  -> m (Maybe a)
 verifyDependencies fetchHash (ValueDeps hashedValue deps) = do
   upToDate <- allM (DMap.toList deps) $ \(depKey :=> depValue) -> do
     depValue' <- fetchHash depKey
@@ -50,13 +51,13 @@ verifyDependencies fetchHash (ValueDeps hashedValue deps) = do
         return False
 
 record
-  :: (GCompare k, HashTag k v)
-  => k i
-  -> v i
-  -> DMap k v
-  -> Traces k v
-  -> Traces k v
+  :: (GCompare f, HashTag f)
+  => f a
+  -> a
+  -> DMap f Identity
+  -> Traces f
+  -> Traces f
 record k v deps
   = DMap.insert k
   $ ValueDeps (hashed k v)
-  $ DMap.mapWithKey hashed deps
+  $ DMap.mapWithKey (\k' (Identity v') -> hashed k' v') deps
