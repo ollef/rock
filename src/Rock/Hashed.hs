@@ -1,12 +1,11 @@
-module Hashed(Hashed, hashed, unhashed, HashTag(hashTagged)) where
+module Rock.Hashed(Hashed, hashed, unhashed) where
 
 import Protolude
 
 import Data.Functor.Classes
 import Text.Show
 
-class HashTag k where
-  hashTagged :: k a -> a -> Int
+import Rock.HashTag
 
 data Hashed a = Hashed !a !Int
   deriving (Show)

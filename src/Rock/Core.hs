@@ -3,16 +3,17 @@
 {-# language RankNTypes #-}
 {-# language ScopedTypeVariables #-}
 {-# language StandaloneDeriving #-}
-module Task where
+module Rock.Core where
 
 import Protolude
 
 import Data.Dependent.Map(DMap, GCompare)
 import qualified Data.Dependent.Map as DMap
 
-import Hashed
-import Traces(Traces)
-import qualified Traces
+import Rock.Hashed
+import Rock.HashTag
+import Rock.Traces(Traces)
+import qualified Rock.Traces as Traces
 
 -------------------------------------------------------------------------------
 -- Types

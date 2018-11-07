@@ -4,7 +4,7 @@
 {-# language MultiParamTypeClasses #-}
 {-# language RankNTypes #-}
 {-# language StandaloneDeriving #-}
-module Examples where
+module Rock.Examples where
 
 import Protolude
 
@@ -14,8 +14,7 @@ import Data.GADT.Compare
 import Data.GADT.Show
 import Text.Show
 
-import Hashed
-import Task
+import Rock
 
 -------------------------------------------------------------------------------
 data ModuleName = ModuleName
@@ -134,7 +133,7 @@ sheetRules key = Task $ do
 
 sheetRules2 :: SheetRules
 sheetRules2 key = Task $ do
-  liftIO $ putText $ "computing 2 " <> Protolude.show key
+  -- liftIO $ putText $ "computing 2 " <> Protolude.show key
   case key of
     A -> pure 12
     B -> do
@@ -143,4 +142,4 @@ sheetRules2 key = Task $ do
     C -> do
       a <- fetch A
       pure $ a + 20
-    D -> (+) <$> fetch B <*> fetch C
+    D -> (+) <$> fetch B <*> ((+) <$> fetch C <*> fetch C)

@@ -2,7 +2,7 @@
 {-# language StandaloneDeriving #-}
 {-# language TemplateHaskell #-}
 {-# language UndecidableInstances #-}
-module Traces where
+module Rock.Traces where
 
 import Protolude
 
@@ -12,7 +12,8 @@ import Data.Dependent.Sum
 import Data.Functor.Classes
 import Text.Show.Deriving
 
-import Hashed
+import Rock.HashTag
+import Rock.Hashed
 
 data ValueDeps f a = ValueDeps
   { value :: !(Hashed a)

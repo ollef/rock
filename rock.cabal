@@ -26,10 +26,12 @@ library
                        -funbox-strict-fields
   hs-source-dirs:      src
   exposed-modules:
-                       Examples
-                       Hashed
-                       Task
-                       Traces
+                       Rock
+                       Rock.Core
+                       Rock.Examples
+                       Rock.HashTag
+                       Rock.Hashed
+                       Rock.Traces
   build-depends:       base >= 4.7 && < 5
                      , dependent-map
                      , dependent-sum
