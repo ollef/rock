@@ -36,6 +36,8 @@ library
                      , dependent-map
                      , dependent-sum
                      , deriving-compat
+                     , mtl
+                     , transformers
                      , protolude
   default-language:    Haskell2010
   default-extensions:  OverloadedStrings, NoImplicitPrelude

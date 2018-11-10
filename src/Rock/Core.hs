@@ -1,5 +1,10 @@
+{-# language DefaultSignatures #-}
+{-# language FlexibleInstances #-}
+{-# language UndecidableInstances #-}
 {-# language DeriveFunctor #-}
+{-# language FunctionalDependencies #-}
 {-# language GADTs #-}
+{-# language MultiParamTypeClasses #-}
 {-# language RankNTypes #-}
 {-# language ScopedTypeVariables #-}
 {-# language StandaloneDeriving #-}
@@ -7,6 +12,15 @@ module Rock.Core where
 
 import Protolude
 
+import Control.Monad.Cont
+import Control.Monad.Identity
+import qualified Control.Monad.RWS.Lazy as Lazy
+import qualified Control.Monad.RWS.Strict as Strict
+import qualified Control.Monad.State.Lazy as Lazy
+import qualified Control.Monad.State.Strict as Strict
+import Control.Monad.Trans.Maybe
+import qualified Control.Monad.Writer.Lazy as Lazy
+import qualified Control.Monad.Writer.Strict as Strict
 import Data.Dependent.Map(DMap, GCompare)
 import qualified Data.Dependent.Map as DMap
 
@@ -41,6 +55,29 @@ data BlockedTask f a where
 data Block f a where
   Fetch :: f a -> Block f a
   Fork :: !(BlockedTask f (a -> b)) -> !(BlockedTask f a) -> Block f b
+
+-------------------------------------------------------------------------------
+-- Fetch class
+
+class Monad m => MonadFetch f m | m -> f where
+  fetch :: f a -> m a
+  default fetch
+    :: (MonadTrans t, MonadFetch f m1, m ~ t m1)
+    => f a
+    -> m a
+  fetch = lift . fetch
+
+instance MonadFetch f m => MonadFetch f (ContT r m)
+instance MonadFetch f m => MonadFetch f (ExceptT e m)
+instance MonadFetch f m => MonadFetch f (IdentityT m)
+instance MonadFetch f m => MonadFetch f (MaybeT m)
+instance MonadFetch f m => MonadFetch f (ReaderT r m)
+instance (MonadFetch f m, Monoid w) => MonadFetch f (Strict.RWST r w s m)
+instance (MonadFetch f m, Monoid w) => MonadFetch f (Lazy.RWST r w s m)
+instance MonadFetch f m => MonadFetch f (Strict.StateT s m)
+instance MonadFetch f m => MonadFetch f (Lazy.StateT s m)
+instance (Monoid w, MonadFetch f m) => MonadFetch f (Strict.WriterT w m)
+instance (Monoid w, MonadFetch f m) => MonadFetch f (Lazy.WriterT w m)
 
 -------------------------------------------------------------------------------
 -- Instances
@@ -103,8 +140,8 @@ transFetchB f (Fork b1 b2) = transFetchBT f b1 <*> transFetchBT f b2
 
 -------------------------------------------------------------------------------
 
-fetch :: f a -> Task f a
-fetch key = MkTask $ pure $ Blocked $ BlockedTask (Fetch key) pure
+instance MonadFetch f (Task f) where
+  fetch key = MkTask $ pure $ Blocked $ BlockedTask (Fetch key) pure
 
 -------------------------------------------------------------------------------
 
