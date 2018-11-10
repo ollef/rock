@@ -18,7 +18,9 @@ import qualified Rock.Traces as Traces
 -------------------------------------------------------------------------------
 -- Types
 
-type Rules f = forall a. f a -> Rule f a
+type Rules f = GenRules f f
+
+type GenRules f g = forall a. f a -> Rule g a
 
 data Rule f a
   = Input (IO a)
@@ -144,11 +146,11 @@ track task = do
   return (result, deps)
 
 memoise
-  :: forall f
+  :: forall f g
   . GCompare f
   => MVar (DMap f MVar)
-  -> Rules f
-  -> Rules f
+  -> GenRules f g
+  -> GenRules f g
 memoise startedVar rules (key :: f a)  =
   case rules key of
     Input io -> Input $ go io
@@ -194,6 +196,25 @@ verifyTraces tracesVar rules key = case rules key of
   where
     fetchHashed :: HashTag f => f a -> Task f (Hashed a)
     fetchHashed key' = hashed key' <$> fetch key'
+
+data Writer w f a where
+  Writer :: f a -> Writer w f (a, w)
+
+writer
+  :: forall f w g
+  . GCompare f
+  => MVar (DMap f (Const w))
+  -> GenRules (Writer w f) g
+  -> GenRules f g
+writer var rules key = case rules $ Writer key of
+  Input io -> Input $ go io
+  Task task -> Task $ go task
+  where
+    go :: MonadIO m => m (a, w) -> m a
+    go m = do
+      (res, w) <- m
+      liftIO $ modifyMVar_ var $ pure . DMap.insert key (Const w)
+      return res
 
 build
   :: forall f a
