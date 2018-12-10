@@ -253,19 +253,3 @@ writer var rules key = case rules $ Writer key of
       liftIO $ modifyMVar_ var $ pure . DMap.insert key (Const w)
       return res
 
-build
-  :: forall f a
-  . (GCompare f, HashTag f)
-  => Rules f
-  -> Traces f
-  -> f a
-  -> IO (a, Traces f)
-build rules traces key = do
-  tracesVar <- newMVar traces
-  startedVar <- newMVar mempty
-  let
-    vtTasks :: Rules f
-    vtTasks = memoise startedVar $ verifyTraces tracesVar rules
-  value <- runTask vtTasks (fetch key)
-  traces' <- readMVar tracesVar
-  return (value, traces')
