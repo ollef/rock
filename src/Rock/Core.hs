@@ -269,3 +269,15 @@ versioned var version rules key = case rules key of
       res <- m
       liftIO $ modifyMVar_ var $ pure . DMap.insert key (Const version)
       return res
+
+traceFetch
+  :: (forall a. f a -> IO ())
+  -> GenRules f g
+  -> GenRules f g
+traceFetch f rules key = case rules key of
+  Input io -> Input $ do
+    f key
+    io
+  Task task -> Task $ do
+    liftIO $ f key
+    task
