@@ -253,3 +253,19 @@ writer var rules key = case rules $ Writer key of
       liftIO $ modifyMVar_ var $ pure . DMap.insert key (Const w)
       return res
 
+versioned
+  :: forall f version g
+  . GCompare f
+  => MVar (DMap f (Const version))
+  -> version
+  -> GenRules f g
+  -> GenRules f g
+versioned var version rules key = case rules key of
+  Input io -> Input $ go io
+  Task task -> Task $ go task
+  where
+    go :: MonadIO m => m a -> m a
+    go m = do
+      res <- m
+      liftIO $ modifyMVar_ var $ pure . DMap.insert key (Const version)
+      return res
