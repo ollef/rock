@@ -145,27 +145,37 @@ instance MonadFetch f (Task f) where
 
 -------------------------------------------------------------------------------
 
-runTask :: Rules f -> Task f a -> IO a
-runTask rules task = do
+type Strategy = forall a b. IO (a -> b) -> IO a -> IO b
+
+sequentially :: Strategy
+sequentially = (<*>)
+
+inParallel :: Strategy
+inParallel mf mx = withAsync mf $ \af -> do
+  x <- mx
+  f <- wait af
+  return $ f x
+
+-------------------------------------------------------------------------------
+
+runTask :: Strategy -> Rules f -> Task f a -> IO a
+runTask fork rules task = do
   result <- unTask task
   case result of
     Done a -> return a
-    Blocked b -> runBT rules b
+    Blocked b -> runBT fork rules b
 
-runBT :: Rules f -> BlockedTask f a -> IO a
-runBT rules (BlockedTask b f) = do
-  a <- runB rules b
-  runTask rules $ f a
+runBT :: Strategy -> Rules f -> BlockedTask f a -> IO a
+runBT fork rules (BlockedTask b f) = do
+  a <- runB fork rules b
+  runTask fork rules $ f a
 
-runB :: Rules f -> Block f a -> IO a
-runB rules (Fetch key) = case rules key of
+runB :: Strategy -> Rules f -> Block f a -> IO a
+runB fork rules (Fetch key) = case rules key of
   Input io -> io
-  Task t -> runTask rules t
-runB rules (Fork bf bx) =
-  withAsync (runBT rules bf) $ \af -> do
-    x <- runBT rules bx
-    f <- wait af
-    return $ f x
+  Task t -> runTask fork rules t
+runB fork rules (Fork bf bx) =
+  fork (runBT fork rules bf) (runBT fork rules bx)
 
 -------------------------------------------------------------------------------
 
