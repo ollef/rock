@@ -249,18 +249,17 @@ data Writer w f a where
 
 writer
   :: forall f w g
-  . GCompare f
-  => MVar (DMap f (Const w))
+  . (forall a. f a -> w -> IO ())
   -> GenRules (Writer w f) g
   -> GenRules f g
-writer var rules key = case rules $ Writer key of
+writer write rules key = case rules $ Writer key of
   Input io -> Input $ go io
   Task task -> Task $ go task
   where
     go :: MonadIO m => m (a, w) -> m a
     go m = do
       (res, w) <- m
-      liftIO $ modifyMVar_ var $ pure . DMap.insert key (Const w)
+      liftIO $ write key w
       return res
 
 versioned
