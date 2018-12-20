@@ -281,12 +281,17 @@ versioned var version rules key = case rules key of
 
 traceFetch
   :: (forall a. f a -> IO ())
+  -> (forall a. f a -> a -> IO ())
   -> GenRules f g
   -> GenRules f g
-traceFetch f rules key = case rules key of
+traceFetch before after rules key = case rules key of
   Input io -> Input $ do
-    f key
-    io
+    before key
+    result <- io
+    after key result
+    return result
   Task task -> Task $ do
-    liftIO $ f key
-    task
+    liftIO $ before key
+    result <- task
+    liftIO $ after key result
+    return result
