@@ -1,13 +1,14 @@
 {-# language DefaultSignatures #-}
-{-# language FlexibleInstances #-}
-{-# language UndecidableInstances #-}
 {-# language DeriveFunctor #-}
+{-# language FlexibleInstances #-}
 {-# language FunctionalDependencies #-}
 {-# language GADTs #-}
+{-# language GeneralizedNewtypeDeriving #-}
 {-# language MultiParamTypeClasses #-}
 {-# language RankNTypes #-}
 {-# language ScopedTypeVariables #-}
 {-# language StandaloneDeriving #-}
+{-# language UndecidableInstances #-}
 module Rock.Core where
 
 import Protolude
@@ -155,6 +156,19 @@ inParallel mf mx = withAsync mf $ \af -> do
   x <- mx
   f <- wait af
   return $ f x
+
+-- | Uses the underlying instances, except for the Applicative instance which
+-- is defined in terms of 'return' and '(>>=)'.
+--
+-- When used with 'Task', i.e. if you construct @m :: 'Sequential' ('Task' f)
+-- a@, this means that fetches within @m@ are done sequentially.
+newtype Sequential m a = Sequential { runSequential :: m a }
+  deriving (Functor, Monad, MonadIO, MonadFetch f)
+
+-- | Defined in terms of 'return' and '(>>=)'.
+instance Monad m => Applicative (Sequential m) where
+  pure = Sequential . return
+  Sequential mf <*> Sequential mx = Sequential $ mf >>= \f -> fmap f mx
 
 -------------------------------------------------------------------------------
 
