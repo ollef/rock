@@ -35,12 +35,7 @@ import qualified Rock.Traces as Traces
 
 type Rules f = GenRules f f
 
-type GenRules f g = forall a. f a -> Rule g a
-
-data Rule f a
-  = Input (IO a)
-  | Task (Task f a)
-  deriving Functor
+type GenRules f g = forall a. f a -> Task g a
 
 newtype Task f a = MkTask { unTask :: IO (Result f a) }
   deriving Functor
@@ -185,9 +180,8 @@ runBT fork rules (BlockedTask b f) = do
   runTask fork rules $ f a
 
 runB :: Strategy -> Rules f -> Block f a -> IO a
-runB fork rules (Fetch key) = case rules key of
-  Input io -> io
-  Task t -> runTask fork rules t
+runB fork rules (Fetch key) =
+  runTask fork rules $ rules key
 runB fork rules (Fork bf bx) =
   fork (runBT fork rules bf) (runBT fork rules bx)
 
@@ -212,48 +206,40 @@ memoise
   => MVar (DMap f MVar)
   -> GenRules f g
   -> GenRules f g
-memoise startedVar rules (key :: f a)  =
-  case rules key of
-    Input io -> Input $ go io
-    Task task -> Task $ go task
-  where
-    go :: MonadIO m => m a -> m a
-    go m =
-      join $ liftIO $ modifyMVar startedVar $ \started ->
-        case DMap.lookup key started of
-          Nothing -> do
-            valueVar <- newEmptyMVar
-            return
-              ( DMap.insert key valueVar started
-              , do
-                value <- m
-                liftIO $ putMVar valueVar value
-                return value
-              )
-          Just valueVar ->
-            return (started, liftIO $ readMVar valueVar)
+memoise startedVar rules (key :: f a) = do
+  join $ liftIO $ modifyMVar startedVar $ \started ->
+    case DMap.lookup key started of
+      Nothing -> do
+        valueVar <- newEmptyMVar
+        return
+          ( DMap.insert key valueVar started
+          , do
+            value <- rules key
+            liftIO $ putMVar valueVar value
+            return value
+          )
+      Just valueVar ->
+        return (started, liftIO $ readMVar valueVar)
 
 verifyTraces
   :: (GCompare f, HashTag f)
   => MVar (Traces f)
   -> Rules f
   -> Rules f
-verifyTraces tracesVar rules key = case rules key of
-  Input io -> Input io
-  Task task -> Task $ do
-    traces <- liftIO $ readMVar tracesVar
-    maybeValue <- case DMap.lookup key traces of
-      Nothing -> return Nothing
-      Just oldValueDeps ->
-        Traces.verifyDependencies fetchHashed oldValueDeps
-    case maybeValue of
-      Nothing -> do
-        (value, deps) <- track task
-        liftIO $ modifyMVar_ tracesVar
-          $ pure
-          . Traces.record key value deps
-        return value
-      Just value -> return value
+verifyTraces tracesVar rules key = do
+  traces <- liftIO $ readMVar tracesVar
+  maybeValue <- case DMap.lookup key traces of
+    Nothing -> return Nothing
+    Just oldValueDeps ->
+      Traces.verifyDependencies fetchHashed oldValueDeps
+  case maybeValue of
+    Nothing -> do
+      (value, deps) <- track $ rules key
+      liftIO $ modifyMVar_ tracesVar
+        $ pure
+        . Traces.record key value deps
+      return value
+    Just value -> return value
   where
     fetchHashed :: HashTag f => f a -> Task f (Hashed a)
     fetchHashed key' = hashed key' <$> fetch key'
@@ -261,20 +247,26 @@ verifyTraces tracesVar rules key = case rules key of
 data Writer w f a where
   Writer :: f a -> Writer w f (a, w)
 
+instance GEq f => GEq (Writer w f) where
+  geq (Writer f) (Writer g) = case geq f g of
+    Nothing -> Nothing
+    Just Refl -> Just Refl
+
+instance GCompare f => GCompare (Writer w f) where
+  gcompare (Writer f) (Writer g) = case gcompare f g of
+    GLT -> GLT
+    GEQ -> GEQ
+    GGT -> GGT
+
 writer
   :: forall f w g
   . (forall a. f a -> w -> IO ())
   -> GenRules (Writer w f) g
   -> GenRules f g
-writer write rules key = case rules $ Writer key of
-  Input io -> Input $ go io
-  Task task -> Task $ go task
-  where
-    go :: MonadIO m => m (a, w) -> m a
-    go m = do
-      (res, w) <- m
-      liftIO $ write key w
-      return res
+writer write rules key = do
+  (res, w) <- rules $ Writer key
+  liftIO $ write key w
+  return res
 
 versioned
   :: forall f version g
@@ -283,29 +275,18 @@ versioned
   -> version
   -> GenRules f g
   -> GenRules f g
-versioned var version rules key = case rules key of
-  Input io -> Input $ go io
-  Task task -> Task $ go task
-  where
-    go :: MonadIO m => m a -> m a
-    go m = do
-      res <- m
-      liftIO $ modifyMVar_ var $ pure . DMap.insert key (Const version)
-      return res
+versioned var version rules key = do
+  res <- rules key
+  liftIO $ modifyMVar_ var $ pure . DMap.insert key (Const version)
+  return res
 
 traceFetch
   :: (forall a. f a -> IO ())
   -> (forall a. f a -> a -> IO ())
   -> GenRules f g
   -> GenRules f g
-traceFetch before after rules key = case rules key of
-  Input io -> Input $ do
-    before key
-    result <- io
-    after key result
-    return result
-  Task task -> Task $ do
-    liftIO $ before key
-    result <- task
-    liftIO $ after key result
-    return result
+traceFetch before after rules key = do
+  liftIO $ before key
+  result <- rules key
+  liftIO $ after key result
+  return result

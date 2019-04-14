@@ -59,8 +59,8 @@ type CompilerTask = Task TaskKey
 type CompilerRules = Rules TaskKey
 
 compilerRules :: CompilerRules
-compilerRules (ParseModuleHeader mname) = Task $ parseModuleHeader mname
-compilerRules (ParseModule mname) = Task $ parseModule mname
+compilerRules (ParseModuleHeader mname) = parseModuleHeader mname
+compilerRules (ParseModule mname) = parseModule mname
 
 parseModuleHeader :: ModuleName -> CompilerTask (ModuleHeader, Text)
 parseModuleHeader mname = pure (ModuleHeader mname, "")
@@ -116,7 +116,7 @@ type SheetTask = Task SheetKey
 type SheetRules = Rules SheetKey
 
 sheetRules :: SheetRules
-sheetRules key = Task $ do
+sheetRules key = do
   liftIO $ putText $ "computing " <> Protolude.show key
   case key of
     A -> pure 10
@@ -132,7 +132,7 @@ sheetRules key = Task $ do
       pure $ b + c
 
 sheetRules2 :: SheetRules
-sheetRules2 key = Task $ do
+sheetRules2 key =
   -- liftIO $ putText $ "computing 2 " <> Protolude.show key
   case key of
     A -> pure 12
