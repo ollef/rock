@@ -7,7 +7,6 @@
 {-# language MultiParamTypeClasses #-}
 {-# language RankNTypes #-}
 {-# language ScopedTypeVariables #-}
-{-# language StandaloneDeriving #-}
 {-# language UndecidableInstances #-}
 module Rock.Core where
 
@@ -24,6 +23,7 @@ import qualified Control.Monad.Writer.Lazy as Lazy
 import qualified Control.Monad.Writer.Strict as Strict
 import Data.Dependent.Map(DMap, GCompare)
 import qualified Data.Dependent.Map as DMap
+import Data.GADT.Compare
 
 import Rock.Hashed
 import Rock.HashTag
@@ -38,12 +38,10 @@ type Rules f = GenRules f f
 type GenRules f g = forall a. f a -> Task g a
 
 newtype Task f a = MkTask { unTask :: IO (Result f a) }
-  deriving Functor
 
 data Result f a
   = Done a
   | Blocked !(BlockedTask f a)
-  deriving Functor
 
 data BlockedTask f a where
   BlockedTask :: Block f a -> (a -> Task f b) -> BlockedTask f b
@@ -78,12 +76,20 @@ instance (Monoid w, MonadFetch f m) => MonadFetch f (Lazy.WriterT w m)
 -------------------------------------------------------------------------------
 -- Instances
 
+instance Functor (Task f) where
+  {-# INLINE fmap #-}
+  fmap f (MkTask t) = MkTask $ fmap f <$> t
+
 instance Applicative (Task f) where
+  {-# INLINE pure #-}
   pure = MkTask . pure . Done
+  {-# INLINE (<*>) #-}
   MkTask mrf <*> MkTask mrx = MkTask $ (<*>) <$> mrf <*> mrx
 
 instance Monad (Task f) where
+  {-# INLINE (>>) #-}
   (>>) = (*>)
+  {-# INLINE (>>=) #-}
   MkTask ma >>= f = MkTask $ do
     ra <- ma
     case ra of
@@ -91,21 +97,33 @@ instance Monad (Task f) where
       Blocked (BlockedTask b k) -> return $ Blocked $ BlockedTask b $ k >=> f
 
 instance MonadIO (Task f) where
+  {-# INLINE liftIO #-}
   liftIO io = MkTask $ pure <$> io
 
+instance Functor (Result f) where
+  {-# INLINE fmap #-}
+  fmap f (Done x) = Done $ f x
+  fmap f (Blocked b) = Blocked $ f <$> b
+
 instance Applicative (Result f) where
+  {-# INLINE pure #-}
   pure = Done
+  {-# INLINE (<*>) #-}
   Done f <*> Done x = Done $ f x
   Done f <*> Blocked b = Blocked $ f <$> b
   Blocked b <*> Done x = Blocked $ ($ x) <$> b
   Blocked b1 <*> Blocked b2 = Blocked $ BlockedTask (Fork b1 b2) pure
 
 instance Monad (Result f) where
+  {-# INLINE (>>) #-}
   (>>) = (*>)
+  {-# INLINE (>>=) #-}
   Done x >>= f = f x
   Blocked (BlockedTask b t) >>= f = Blocked $ BlockedTask b $ t >=> MkTask . pure . f
 
-deriving instance Functor (BlockedTask f)
+instance Functor (BlockedTask f) where
+  {-# INLINE fmap #-}
+  fmap f (BlockedTask b t) = BlockedTask b $ fmap f <$> t
 
 -------------------------------------------------------------------------------
 
@@ -162,7 +180,9 @@ newtype Sequential m a = Sequential { runSequential :: m a }
 
 -- | Defined in terms of 'return' and '(>>=)'.
 instance Monad m => Applicative (Sequential m) where
+  {-# INLINE pure #-}
   pure = Sequential . return
+  {-# INLINE (<*>) #-}
   Sequential mf <*> Sequential mx = Sequential $ mf >>= \f -> fmap f mx
 
 -------------------------------------------------------------------------------
