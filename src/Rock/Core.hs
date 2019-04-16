@@ -226,7 +226,7 @@ memoise
   => MVar (DMap f MVar)
   -> GenRules f g
   -> GenRules f g
-memoise startedVar rules (key :: f a) = do
+memoise startedVar rules (key :: f a) =
   join $ liftIO $ modifyMVar startedVar $ \started ->
     case DMap.lookup key started of
       Nothing -> do
@@ -244,7 +244,7 @@ memoise startedVar rules (key :: f a) = do
 verifyTraces
   :: (GCompare f, HashTag f)
   => MVar (Traces f)
-  -> Rules f
+  -> GenRules (Writer TaskKind f) f
   -> Rules f
 verifyTraces tracesVar rules key = do
   traces <- liftIO $ readMVar tracesVar
@@ -254,15 +254,23 @@ verifyTraces tracesVar rules key = do
       Traces.verifyDependencies fetchHashed oldValueDeps
   case maybeValue of
     Nothing -> do
-      (value, deps) <- track $ rules key
-      liftIO $ modifyMVar_ tracesVar
-        $ pure
-        . Traces.record key value deps
+      ((value, taskKind), deps) <- track $ rules $ Writer key
+      case taskKind of
+        Input ->
+          return ()
+        NonInput ->
+          liftIO $ modifyMVar_ tracesVar
+            $ pure
+            . Traces.record key value deps
       return value
     Just value -> return value
   where
     fetchHashed :: HashTag f => f a -> Task f (Hashed a)
     fetchHashed key' = hashed key' <$> fetch key'
+
+data TaskKind
+  = Input -- ^ Used for tasks whose results can change independently of their fetched dependencies, i.e. inputs.
+  | NonInput -- ^ Used for task whose results only depend on fetched dependencies.
 
 data Writer w f a where
   Writer :: f a -> Writer w f (a, w)
