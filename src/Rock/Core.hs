@@ -280,12 +280,12 @@ instance GCompare f => GCompare (Writer w f) where
 
 writer
   :: forall f w g
-  . (forall a. f a -> w -> IO ())
+  . (forall a. f a -> w -> Task g ())
   -> GenRules (Writer w f) g
   -> GenRules f g
 writer write rules key = do
   (res, w) <- rules $ Writer key
-  liftIO $ write key w
+  write key w
   return res
 
 versioned
@@ -301,12 +301,12 @@ versioned var version rules key = do
   return res
 
 traceFetch
-  :: (forall a. f a -> IO ())
-  -> (forall a. f a -> a -> IO ())
+  :: (forall a. f a -> Task g ())
+  -> (forall a. f a -> a -> Task g ())
   -> GenRules f g
   -> GenRules f g
 traceFetch before after rules key = do
-  liftIO $ before key
+  before key
   result <- rules key
-  liftIO $ after key result
+  after key result
   return result
