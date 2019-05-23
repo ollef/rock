@@ -37,7 +37,7 @@ type Rules f = GenRules f f
 
 type GenRules f g = forall a. f a -> Task g a
 
-newtype Task f a = MkTask { unTask :: IO (Result f a) }
+newtype Task f a = Task { unTask :: IO (Result f a) }
 
 data Result f a
   = Done a
@@ -78,19 +78,19 @@ instance (Monoid w, MonadFetch f m) => MonadFetch f (Lazy.WriterT w m)
 
 instance Functor (Task f) where
   {-# INLINE fmap #-}
-  fmap f (MkTask t) = MkTask $ fmap f <$> t
+  fmap f (Task t) = Task $ fmap f <$> t
 
 instance Applicative (Task f) where
   {-# INLINE pure #-}
-  pure = MkTask . pure . Done
+  pure = Task . pure . Done
   {-# INLINE (<*>) #-}
-  MkTask mrf <*> MkTask mrx = MkTask $ (<*>) <$> mrf <*> mrx
+  Task mrf <*> Task mrx = Task $ (<*>) <$> mrf <*> mrx
 
 instance Monad (Task f) where
   {-# INLINE (>>) #-}
   (>>) = (*>)
   {-# INLINE (>>=) #-}
-  MkTask ma >>= f = MkTask $ do
+  Task ma >>= f = Task $ do
     ra <- ma
     case ra of
       Done a -> unTask $ f a
@@ -98,7 +98,7 @@ instance Monad (Task f) where
 
 instance MonadIO (Task f) where
   {-# INLINE liftIO #-}
-  liftIO io = MkTask $ pure <$> io
+  liftIO io = Task $ pure <$> io
 
 instance Functor (Result f) where
   {-# INLINE fmap #-}
@@ -119,7 +119,7 @@ instance Monad (Result f) where
   (>>) = (*>)
   {-# INLINE (>>=) #-}
   Done x >>= f = f x
-  Blocked (BlockedTask b t) >>= f = Blocked $ BlockedTask b $ t >=> MkTask . pure . f
+  Blocked (BlockedTask b t) >>= f = Blocked $ BlockedTask b $ t >=> Task . pure . f
 
 instance Functor (BlockedTask f) where
   {-# INLINE fmap #-}
@@ -131,7 +131,7 @@ transFetch
   :: (forall b. f b -> Task f' b)
   -> Task f a
   -> Task f' a
-transFetch f task = MkTask $ do
+transFetch f task = Task $ do
   result <- unTask task
   case result of
     Done a -> return $ Done a
@@ -155,7 +155,7 @@ transFetchB f (Fork b1 b2) = transFetchBT f b1 <*> transFetchBT f b2
 -------------------------------------------------------------------------------
 
 instance MonadFetch f (Task f) where
-  fetch key = MkTask $ pure $ Blocked $ BlockedTask (Fetch key) pure
+  fetch key = Task $ pure $ Blocked $ BlockedTask (Fetch key) pure
 
 -------------------------------------------------------------------------------
 
