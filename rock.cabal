@@ -30,7 +30,6 @@ library
   exposed-modules:
                        Rock
                        Rock.Core
-                       Rock.Examples
                        Rock.HashTag
                        Rock.Hashed
                        Rock.Traces
@@ -47,3 +46,18 @@ library
 source-repository head
   type:     git
   location: https://github.com/ollef/rock
+
+flag examples
+  Description: "Build examples"
+  Default:     False
+  Manual:      True
+
+executable rock-spreadsheet
+  if !flag(examples)
+    buildable:         False
+  main-is:             Spreadsheet.hs
+  ghc-options:         -Wall
+                       -threaded
+  hs-source-dirs:      examples
+  default-language:    Haskell2010
+  build-depends:       base, rock, protolude, dependent-sum-template

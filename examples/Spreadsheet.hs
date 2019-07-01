@@ -1,14 +1,3 @@
-# rock [![Hackage](https://img.shields.io/hackage/v/rock.svg)](https://hackage.haskell.org/package/rock)
-
-A build system inspired by [Build systems à la carte](https://www.microsoft.com/en-us/research/publication/build-systems-la-carte/) and [Haxl](http://hackage.haskell.org/package/haxl).
-
-Used in [Sixten](https://github.com/ollef/sixten) and
-[Sixty](https://github.com/ollef/sixty) to achieve incremental and query driven
-compiler architectures.
-
-# Example
-
-```haskell
 {-# language GADTs #-}
 {-# language NoImplicitPrelude #-}
 {-# language OverloadedStrings #-}
@@ -69,38 +58,3 @@ main = do
         (Rock.memoise memoVar rules)
         (Rock.fetch D)
     print result
-```
-
-Prints
-
-```
-Running
-Fetching D
-Fetching B
-Fetching A
-Fetching C
-Fetching A
-70
-Running with memoisation
-Fetching D
-Fetching B
-Fetching A
-Fetching C
-70
-Running with memoisation using the parallel strategy
-Fetching D
-Fetching C
-Fetching B
-Fetching A
-70
-```
-
-# Related projects
-
-* [Shake](http://hackage.haskell.org/package/shake)
-* [Salsa](https://crates.io/crates/salsa)
-
-# Contributions
-
-... are very welcome, especially in the areas of documentation, examples,
-testing, and benchmarking.
