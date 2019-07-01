@@ -10,7 +10,9 @@ maintainer:          fredriksson.olle@gmail.com
 copyright:           2018-2019 Olle Fredriksson
 category:            Development
 build-type:          Simple
-extra-source-files:  README.md
+extra-source-files:
+                     README.md
+                     CHANGELOG.md
 cabal-version:       >=1.10
 
 library
