@@ -31,14 +31,22 @@ import Rock.Traces(Traces)
 import qualified Rock.Traces as Traces
 
 -------------------------------------------------------------------------------
--- Types
+-- * Types
 
+-- | A function which, given an @f@ query, returns a 'Task' allowed to make @f@
+-- queries to compute its result.
 type Rules f = GenRules f f
 
+-- | A function which, given an @f@ query, returns a 'Task' allowed to make @g@
+-- queries to compute its result.
 type GenRules f g = forall a. f a -> Task g a
 
+-- | An @IO@ action that is allowed to make @f@ queries using the 'fetch'
+-- method from its 'MonadFetch' instance.
 newtype Task f a = Task { unTask :: IO (Result f a) }
 
+-- | The result of a @Task@, which is either done or wanting to make one or
+-- more @f@ queries.
 data Result f a
   = Done a
   | Blocked !(BlockedTask f a)
@@ -48,11 +56,12 @@ data BlockedTask f a where
 
 data Block f a where
   Fetch :: f a -> Block f a
-  Fork :: !(BlockedTask f (a -> b)) -> !(BlockedTask f a) -> Block f b
+  Ap :: !(BlockedTask f (a -> b)) -> !(BlockedTask f a) -> Block f b
 
 -------------------------------------------------------------------------------
--- Fetch class
+-- * Fetch class
 
+-- | Monads that can make @f@ queries by 'fetch'ing them.
 class Monad m => MonadFetch f m | m -> f where
   fetch :: f a -> m a
   default fetch
@@ -80,6 +89,9 @@ instance Functor (Task f) where
   {-# INLINE fmap #-}
   fmap f (Task t) = Task $ fmap f <$> t
 
+-- Note: This instance might not fully evaluate @t1@ before @t2@ in
+-- @t1 '<*>' t2@ in case @t1@ performs a query using 'fetch'. If this
+-- is not desirable, use 'Sequential'.
 instance Applicative (Task f) where
   {-# INLINE pure #-}
   pure = Task . pure . Done
@@ -100,6 +112,9 @@ instance MonadIO (Task f) where
   {-# INLINE liftIO #-}
   liftIO io = Task $ pure <$> io
 
+instance MonadFetch f (Task f) where
+  fetch key = Task $ pure $ Blocked $ BlockedTask (Fetch key) pure
+
 instance Functor (Result f) where
   {-# INLINE fmap #-}
   fmap f (Done x) = Done $ f x
@@ -112,7 +127,7 @@ instance Applicative (Result f) where
   Done f <*> Done x = Done $ f x
   Done f <*> Blocked b = Blocked $ f <$> b
   Blocked b <*> Done x = Blocked $ ($ x) <$> b
-  Blocked b1 <*> Blocked b2 = Blocked $ BlockedTask (Fork b1 b2) pure
+  Blocked b1 <*> Blocked b2 = Blocked $ BlockedTask (Ap b1 b2) pure
 
 instance Monad (Result f) where
   {-# INLINE (>>) #-}
@@ -126,7 +141,9 @@ instance Functor (BlockedTask f) where
   fmap f (BlockedTask b t) = BlockedTask b $ fmap f <$> t
 
 -------------------------------------------------------------------------------
+-- * Transformations
 
+-- | Transform the type of queries that a 'Task' performs.
 transFetch
   :: (forall b. f b -> Task f' b)
   -> Task f a
@@ -135,35 +152,35 @@ transFetch f task = Task $ do
   result <- unTask task
   case result of
     Done a -> return $ Done a
-    Blocked b -> unTask $ transFetchBT f b
+    Blocked b -> unTask $ transFetchBlockedTask f b
 
-transFetchBT
+transFetchBlockedTask
   :: (forall b. f b -> Task f' b)
   -> BlockedTask f a
   -> Task f' a
-transFetchBT f (BlockedTask b t) = do
-  a <- transFetchB f b
+transFetchBlockedTask f (BlockedTask b t) = do
+  a <- transFetchBlock f b
   transFetch f $ t a
 
-transFetchB
+transFetchBlock
   :: (forall b. f b -> Task f' b)
   -> Block f a
   -> Task f' a
-transFetchB f (Fetch k) = f k
-transFetchB f (Fork b1 b2) = transFetchBT f b1 <*> transFetchBT f b2
+transFetchBlock f (Fetch k) = f k
+transFetchBlock f (Ap b1 b2) = transFetchBlockedTask f b1 <*> transFetchBlockedTask f b2
 
 -------------------------------------------------------------------------------
+-- * Strategies
 
-instance MonadFetch f (Task f) where
-  fetch key = Task $ pure $ Blocked $ BlockedTask (Fetch key) pure
-
--------------------------------------------------------------------------------
-
+-- | A 'Strategy' specifies how two queries are performed in an 'Applicative'
+-- context.
 type Strategy = forall a b. IO (a -> b) -> IO a -> IO b
 
+-- | Runs the two queries in sequence.
 sequentially :: Strategy
 sequentially = (<*>)
 
+-- | Runs the two queries in parallel.
 inParallel :: Strategy
 inParallel mf mx = withAsync mf $ \af -> do
   x <- mx
@@ -186,27 +203,31 @@ instance Monad m => Applicative (Sequential m) where
   Sequential mf <*> Sequential mx = Sequential $ mf >>= \f -> fmap f mx
 
 -------------------------------------------------------------------------------
+-- * Running tasks
 
+-- | Perform a 'Task', fetching dependency queries from the given 'Rules' function and using the given 'Strategy' for fetches in an 'Applicative' context.
 runTask :: Strategy -> Rules f -> Task f a -> IO a
-runTask fork rules task = do
+runTask strategy rules task = do
   result <- unTask task
   case result of
     Done a -> return a
-    Blocked b -> runBT fork rules b
+    Blocked b -> runBlockedTask strategy rules b
 
-runBT :: Strategy -> Rules f -> BlockedTask f a -> IO a
-runBT fork rules (BlockedTask b f) = do
-  a <- runB fork rules b
-  runTask fork rules $ f a
+runBlockedTask :: Strategy -> Rules f -> BlockedTask f a -> IO a
+runBlockedTask strategy rules (BlockedTask b f) = do
+  a <- runBlock strategy rules b
+  runTask strategy rules $ f a
 
-runB :: Strategy -> Rules f -> Block f a -> IO a
-runB fork rules (Fetch key) =
-  runTask fork rules $ rules key
-runB fork rules (Fork bf bx) =
-  fork (runBT fork rules bf) (runBT fork rules bx)
+runBlock :: Strategy -> Rules f -> Block f a -> IO a
+runBlock strategy rules (Fetch key) =
+  runTask strategy rules $ rules key
+runBlock strategy rules (Ap bf bx) =
+  strategy (runBlockedTask strategy rules bf) (runBlockedTask strategy rules bx)
 
 -------------------------------------------------------------------------------
+-- * Task combinators
 
+-- | Track the query dependencies of a 'Task' in a 'DMap'
 track :: forall f a. GCompare f => Task f a -> Task f (a, DMap f Identity)
 track task = do
   depsVar <- liftIO $ newMVar mempty
@@ -220,6 +241,11 @@ track task = do
   deps <- liftIO $ readMVar depsVar
   return (result, deps)
 
+-- | Remember what @f@ queries have already been performed and their results in
+-- a 'DMap', and reuse them if a query is performed again a second time.
+--
+-- The 'DMap' should typically not be reused if there has been some change that
+-- might make a query return a different result.
 memoise
   :: forall f g
   . GCompare f
@@ -241,6 +267,11 @@ memoise startedVar rules (key :: f a) =
       Just valueVar ->
         return (started, liftIO $ readMVar valueVar)
 
+-- | Remember the results of previous @f@ queries and what their dependencies
+-- were then.
+--
+-- If all dependencies of a 'NonInput' query are the same, reuse the old result.
+-- The 'DMap' _can_ be reused if there are changes to 'Input' queries.
 verifyTraces
   :: (GCompare f, HashTag f)
   => MVar (Traces f)
@@ -272,6 +303,7 @@ data TaskKind
   = Input -- ^ Used for tasks whose results can change independently of their fetched dependencies, i.e. inputs.
   | NonInput -- ^ Used for task whose results only depend on fetched dependencies.
 
+-- | A query that returns a @w@ alongside the ordinary @a@.
 data Writer w f a where
   Writer :: f a -> Writer w f (a, w)
 
@@ -286,6 +318,8 @@ instance GCompare f => GCompare (Writer w f) where
     GEQ -> GEQ
     GGT -> GGT
 
+-- | @'writer' write rules@ runs @write w@ each time a @w@ is returned from a
+-- rule in @rules@.
 writer
   :: forall f w g
   . (forall a. f a -> w -> Task g ())
@@ -296,18 +330,9 @@ writer write rules key = do
   write key w
   return res
 
-versioned
-  :: forall f version g
-  . GCompare f
-  => MVar (DMap f (Const version))
-  -> version
-  -> GenRules f g
-  -> GenRules f g
-versioned var version rules key = do
-  res <- rules key
-  liftIO $ modifyMVar_ var $ pure . DMap.insert key (Const version)
-  return res
-
+-- | @'traceFetch' before after rules@ runs @before q@ before a query is
+-- performed from @rules@, and @after q result@ every time a query returns with
+-- result @result@. 
 traceFetch
   :: (forall a. f a -> Task g ())
   -> (forall a. f a -> a -> Task g ())
