@@ -1,3 +1,4 @@
+{-# language CPP #-}
 {-# language DefaultSignatures #-}
 {-# language DeriveFunctor #-}
 {-# language FlexibleInstances #-}
@@ -10,7 +11,11 @@
 {-# language UndecidableInstances #-}
 module Rock.Core where
 
+#if MIN_VERSION_base(4,12,0)
+import Protolude hiding (Ap)
+#else
 import Protolude
+#endif
 
 import Control.Monad.Cont
 import Control.Monad.Identity
