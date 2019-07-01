@@ -1,7 +1,10 @@
 name:                rock
 version:             0.1.0.0
--- synopsis:
--- description:
+synopsis:            A build system for incremental, parallel, and demand-driven computations
+description:         See <https://www.github.com/ollef/rock> for more
+                     information and
+                     <https://github.com/ollef/rock/tree/master/examples> for
+                     examples.
 homepage:            https://github.com/ollef/rock#readme
 license:             BSD3
 license-file:        LICENSE
