@@ -5,7 +5,6 @@
 {-# language FunctionalDependencies #-}
 {-# language GADTs #-}
 {-# language GeneralizedNewtypeDeriving #-}
-{-# language MultiParamTypeClasses #-}
 {-# language RankNTypes #-}
 {-# language ScopedTypeVariables #-}
 {-# language UndecidableInstances #-}
