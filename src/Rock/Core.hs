@@ -276,7 +276,7 @@ memoise startedVar rules (key :: f a) =
 -- were then.
 --
 -- If all dependencies of a 'NonInput' query are the same, reuse the old result.
--- The 'DMap' _can_ be reused if there are changes to 'Input' queries.
+-- 'Input' queries are not reused.
 verifyTraces
   :: (GCompare f, HashTag f)
   => MVar (Traces f)
