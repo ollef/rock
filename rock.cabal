@@ -37,6 +37,7 @@ library
                        Rock.Hashed
                        Rock.Traces
   build-depends:       base >= 4.7 && < 5
+                     , containers
                      , dependent-map
                      , dependent-sum
                      , deriving-compat
