@@ -18,6 +18,8 @@ import Protolude
 
 import Control.Monad.Cont
 import Control.Monad.Identity
+import qualified Data.Map as Map
+import qualified Data.Set as Set
 import qualified Control.Monad.RWS.Lazy as Lazy
 import qualified Control.Monad.RWS.Strict as Strict
 import qualified Control.Monad.State.Lazy as Lazy
@@ -28,6 +30,7 @@ import qualified Control.Monad.Writer.Strict as Strict
 import Data.Dependent.Map(DMap, GCompare)
 import qualified Data.Dependent.Map as DMap
 import Data.GADT.Compare
+import Data.Some
 
 import Rock.Hashed
 import Rock.HashTag
@@ -347,3 +350,36 @@ traceFetch before after rules key = do
   result <- rules key
   after key result
   return result
+
+type ReverseDependencies f = Map (Some f) (Set (Some f))
+
+-- | Write reverse dependencies to the 'MVar'.
+trackReverseDependencies
+  :: GCompare f
+  => MVar (ReverseDependencies f)
+  -> Rules f
+  -> Rules f
+trackReverseDependencies reverseDepsVar rules key = do
+  (res, deps) <- track $ rules key
+  unless (DMap.null deps) $ do
+    let newReverseDeps = Map.fromListWith (<>)
+          [ (This depKey, Set.singleton $ This key)
+          | depKey DMap.:=> _ <- DMap.toList deps
+          ]
+    liftIO $ modifyMVar_ reverseDepsVar $ pure . Map.unionWith (<>) newReverseDeps
+  pure res
+
+-- | @'invalidateReverseDependencies' key@ removes all keys reachable, by
+-- reverse dependency, from @key@ from the input 'DMap'. It also returns the
+-- reverse dependency map with those same keys removed.
+invalidateReverseDependencies
+  :: GCompare f
+  => f a
+  -> ReverseDependencies f
+  -> DMap f g
+  -> (ReverseDependencies f, DMap f g)
+invalidateReverseDependencies key reverseDeps m =
+  foldl'
+    (\(reverseDeps', m') (This key') -> invalidateReverseDependencies key' reverseDeps' m')
+    (Map.delete (This key) reverseDeps, DMap.delete key m)
+    (Set.toList $ Map.findWithDefault mempty (This key) reverseDeps)
