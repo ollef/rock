@@ -1,6 +1,7 @@
 {-# language CPP #-}
 {-# language DefaultSignatures #-}
 {-# language DeriveFunctor #-}
+{-# language FlexibleContexts #-}
 {-# language FlexibleInstances #-}
 {-# language FunctionalDependencies #-}
 {-# language GADTs #-}
@@ -18,8 +19,6 @@ import Protolude
 
 import Control.Monad.Cont
 import Control.Monad.Identity
-import qualified Data.Map as Map
-import qualified Data.Set as Set
 import qualified Control.Monad.RWS.Lazy as Lazy
 import qualified Control.Monad.RWS.Strict as Strict
 import qualified Control.Monad.State.Lazy as Lazy
@@ -29,11 +28,12 @@ import qualified Control.Monad.Writer.Lazy as Lazy
 import qualified Control.Monad.Writer.Strict as Strict
 import Data.Dependent.Map(DMap, GCompare)
 import qualified Data.Dependent.Map as DMap
+import Data.Dependent.Sum
 import Data.GADT.Compare
+import qualified Data.Map as Map
+import qualified Data.Set as Set
 import Data.Some
 
-import Rock.Hashed
-import Rock.HashTag
 import Rock.Traces(Traces)
 import qualified Rock.Traces as Traces
 
@@ -280,7 +280,7 @@ memoise startedVar rules (key :: f a) =
 -- If all dependencies of a 'NonInput' query are the same, reuse the old result.
 -- 'Input' queries are not reused.
 verifyTraces
-  :: (GCompare f, HashTag f)
+  :: (EqTag f Identity, GCompare f)
   => MVar (Traces f)
   -> GenRules (Writer TaskKind f) f
   -> Rules f
@@ -289,7 +289,7 @@ verifyTraces tracesVar rules key = do
   maybeValue <- case DMap.lookup key traces of
     Nothing -> return Nothing
     Just oldValueDeps ->
-      Traces.verifyDependencies fetchHashed oldValueDeps
+      Traces.verifyDependencies fetch oldValueDeps
   case maybeValue of
     Nothing -> do
       ((value, taskKind), deps) <- track $ rules $ Writer key
@@ -302,9 +302,6 @@ verifyTraces tracesVar rules key = do
             . Traces.record key value deps
       return value
     Just value -> return value
-  where
-    fetchHashed :: HashTag f => f a -> Task f (Hashed a)
-    fetchHashed key' = hashed key' <$> fetch key'
 
 data TaskKind
   = Input -- ^ Used for tasks whose results can change independently of their fetched dependencies, i.e. inputs.
