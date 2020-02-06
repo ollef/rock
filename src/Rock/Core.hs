@@ -1,7 +1,6 @@
 {-# language CPP #-}
 {-# language DefaultSignatures #-}
 {-# language DeriveFunctor #-}
-{-# language FlexibleContexts #-}
 {-# language FlexibleInstances #-}
 {-# language FunctionalDependencies #-}
 {-# language GADTs #-}
@@ -19,6 +18,8 @@ import Protolude
 
 import Control.Monad.Cont
 import Control.Monad.Identity
+import qualified Data.Map as Map
+import qualified Data.Set as Set
 import qualified Control.Monad.RWS.Lazy as Lazy
 import qualified Control.Monad.RWS.Strict as Strict
 import qualified Control.Monad.State.Lazy as Lazy
@@ -28,12 +29,10 @@ import qualified Control.Monad.Writer.Lazy as Lazy
 import qualified Control.Monad.Writer.Strict as Strict
 import Data.Dependent.Map(DMap, GCompare)
 import qualified Data.Dependent.Map as DMap
-import Data.Dependent.Sum
 import Data.GADT.Compare
-import qualified Data.Map as Map
-import qualified Data.Set as Set
 import Data.Some
 
+import Rock.HashTag
 import Rock.Traces(Traces)
 import qualified Rock.Traces as Traces
 
@@ -235,14 +234,18 @@ runBlock strategy rules (Ap bf bx) =
 -- * Task combinators
 
 -- | Track the query dependencies of a 'Task' in a 'DMap'
-track :: forall f a. GCompare f => Task f a -> Task f (a, DMap f Identity)
-track task = do
+track
+  :: forall f g a. GCompare f
+  => (forall a'. f a' -> a' -> g a')
+  -> Task f a
+  -> Task f (a, DMap f g)
+track f task = do
   depsVar <- liftIO $ newMVar mempty
   let
     record :: f b -> Task f b
     record key = do
       value <- fetch key
-      liftIO $ modifyMVar_ depsVar $ pure . DMap.insert key (Identity value)
+      liftIO $ modifyMVar_ depsVar $ pure . DMap.insert key (f key value)
       return value
   result <- transFetch record task
   deps <- liftIO $ readMVar depsVar
@@ -280,7 +283,7 @@ memoise startedVar rules (key :: f a) =
 -- If all dependencies of a 'NonInput' query are the same, reuse the old result.
 -- 'Input' queries are not reused.
 verifyTraces
-  :: (EqTag f Identity, GCompare f)
+  :: (GCompare f, HashTag f)
   => MVar (Traces f)
   -> GenRules (Writer TaskKind f) f
   -> Rules f
@@ -292,7 +295,7 @@ verifyTraces tracesVar rules key = do
       Traces.verifyDependencies fetch oldValueDeps
   case maybeValue of
     Nothing -> do
-      ((value, taskKind), deps) <- track $ rules $ Writer key
+      ((value, taskKind), deps) <- track (\k -> Const . hashTagged k) $ rules $ Writer key
       case taskKind of
         Input ->
           return ()
@@ -357,11 +360,11 @@ trackReverseDependencies
   -> Rules f
   -> Rules f
 trackReverseDependencies reverseDepsVar rules key = do
-  (res, deps) <- track $ rules key
+  (res, deps) <- track (\_ _ -> Const ()) $ rules key
   unless (DMap.null deps) $ do
     let newReverseDeps = Map.fromListWith (<>)
           [ (This depKey, Set.singleton $ This key)
-          | depKey DMap.:=> _ <- DMap.toList deps
+          | depKey DMap.:=> Const () <- DMap.toList deps
           ]
     liftIO $ modifyMVar_ reverseDepsVar $ pure . Map.unionWith (<>) newReverseDeps
   pure res

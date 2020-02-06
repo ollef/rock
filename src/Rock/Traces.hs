@@ -1,4 +1,3 @@
-{-# language FlexibleContexts #-}
 {-# language RankNTypes #-}
 {-# language StandaloneDeriving #-}
 {-# language TemplateHaskell #-}
@@ -13,29 +12,31 @@ import Data.Dependent.Sum
 import Data.Functor.Classes
 import Text.Show.Deriving
 
+import Rock.HashTag
+
 data ValueDeps f a = ValueDeps
   { value :: !a
-  , dependencies :: !(DMap f Identity)
+  , dependencies :: !(DMap f (Const Int))
   }
 
 return []
 
-deriving instance (ShowTag f Identity, Show a) => Show (ValueDeps f a)
+deriving instance (Show a, ShowTag f (Const Int)) => Show (ValueDeps f a)
 
-instance ShowTag f Identity => Show1 (ValueDeps f) where
+instance ShowTag f (Const Int) => Show1 (ValueDeps f) where
   liftShowsPrec = $(makeLiftShowsPrec ''ValueDeps)
 
 type Traces f = DMap f (ValueDeps f)
 
 verifyDependencies
-  :: (Monad m, EqTag f Identity)
+  :: (Monad m, HashTag f)
   => (forall a'. f a' -> m a')
   -> ValueDeps f a
   -> m (Maybe a)
 verifyDependencies fetch (ValueDeps value_ deps) = do
-  upToDate <- allM (DMap.toList deps) $ \(depKey :=> depValue) -> do
-    depValue' <- fetch depKey
-    return $ eqTagged depKey depKey depValue $ Identity depValue'
+  upToDate <- allM (DMap.toList deps) $ \(depKey :=> Const depHash) -> do
+    depValue <- fetch depKey
+    return $ hashTagged depKey depValue == depHash
   return $ if upToDate
     then Just value_
     else Nothing
@@ -53,7 +54,7 @@ record
   :: GCompare f
   => f a
   -> a
-  -> DMap f Identity
+  -> DMap f (Const Int)
   -> Traces f
   -> Traces f
 record k v deps

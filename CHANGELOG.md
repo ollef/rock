@@ -1,5 +1,7 @@
 # Unreleased
 
+- Start using _only_ hashes when verifying traces
+
 # 0.2.0.0
 
 - Stop using hashes when verifying traces (gets rid of the `Rock.HashTag` and `Rock.Hashed` modules)
