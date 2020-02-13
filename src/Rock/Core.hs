@@ -285,14 +285,15 @@ memoise startedVar rules (key :: f a) =
 verifyTraces
   :: (GCompare f, HashTag f)
   => MVar (Traces f)
+  -> MVar (DMap f (Const Int))
   -> GenRules (Writer TaskKind f) f
   -> Rules f
-verifyTraces tracesVar rules key = do
+verifyTraces tracesVar hashesVar rules key = do
   traces <- liftIO $ readMVar tracesVar
   maybeValue <- case DMap.lookup key traces of
     Nothing -> return Nothing
     Just oldValueDeps ->
-      Traces.verifyDependencies fetch oldValueDeps
+      Traces.verifyDependencies fetch hashesVar oldValueDeps
   case maybeValue of
     Nothing -> do
       ((value, taskKind), deps) <- track (\k -> Const . hashTagged k) $ rules $ Writer key

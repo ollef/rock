@@ -29,14 +29,27 @@ instance ShowTag f (Const Int) => Show1 (ValueDeps f) where
 type Traces f = DMap f (ValueDeps f)
 
 verifyDependencies
-  :: (Monad m, HashTag f)
+  :: (MonadIO m, GCompare f, HashTag f)
   => (forall a'. f a' -> m a')
+  -> MVar (DMap f (Const Int))
   -> ValueDeps f a
   -> m (Maybe a)
-verifyDependencies fetch (ValueDeps value_ deps) = do
+verifyDependencies fetch hashesVar (ValueDeps value_ deps) = do
   upToDate <- allM (DMap.toList deps) $ \(depKey :=> Const depHash) -> do
-    depValue <- fetch depKey
-    return $ hashTagged depKey depValue == depHash
+    hashes <- liftIO $ readMVar hashesVar
+    newDepHash <-
+      case DMap.lookup depKey hashes of
+        Just (Const newDepHash) ->
+          return newDepHash
+
+        Nothing -> do
+          depValue <- fetch depKey
+          let newDepHash = hashTagged depKey depValue
+          liftIO $ modifyMVar_ hashesVar
+            $ pure
+            . DMap.insert depKey (Const newDepHash)
+          return newDepHash
+    return $ newDepHash == depHash
   return $ if upToDate
     then Just value_
     else Nothing
