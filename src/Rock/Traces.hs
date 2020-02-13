@@ -12,44 +12,31 @@ import Data.Dependent.Sum
 import Data.Functor.Classes
 import Text.Show.Deriving
 
-import Rock.HashTag
-
-data ValueDeps f a = ValueDeps
+data ValueDeps f dep a = ValueDeps
   { value :: !a
-  , dependencies :: !(DMap f (Const Int))
+  , dependencies :: !(DMap f dep)
   }
 
 return []
 
-deriving instance (Show a, ShowTag f (Const Int)) => Show (ValueDeps f a)
+deriving instance (Show a, ShowTag f dep) => Show (ValueDeps f dep a)
 
-instance ShowTag f (Const Int) => Show1 (ValueDeps f) where
+instance ShowTag f dep => Show1 (ValueDeps f dep) where
   liftShowsPrec = $(makeLiftShowsPrec ''ValueDeps)
 
-type Traces f = DMap f (ValueDeps f)
+type Traces f dep = DMap f (ValueDeps f dep)
 
 verifyDependencies
-  :: (MonadIO m, GCompare f, HashTag f)
+  :: (MonadIO m, EqTag f dep)
   => (forall a'. f a' -> m a')
-  -> MVar (DMap f (Const Int))
-  -> ValueDeps f a
+  -> (forall a'. f a' -> a' -> m (dep a'))
+  -> ValueDeps f dep a
   -> m (Maybe a)
-verifyDependencies fetch hashesVar (ValueDeps value_ deps) = do
-  upToDate <- allM (DMap.toList deps) $ \(depKey :=> Const depHash) -> do
-    hashes <- liftIO $ readMVar hashesVar
-    newDepHash <-
-      case DMap.lookup depKey hashes of
-        Just (Const newDepHash) ->
-          return newDepHash
-
-        Nothing -> do
-          depValue <- fetch depKey
-          let newDepHash = hashTagged depKey depValue
-          liftIO $ modifyMVar_ hashesVar
-            $ pure
-            . DMap.insert depKey (Const newDepHash)
-          return newDepHash
-    return $ newDepHash == depHash
+verifyDependencies fetch createDependencyRecord (ValueDeps value_ deps) = do
+  upToDate <- allM (DMap.toList deps) $ \(depKey :=> dep) -> do
+    depValue <- fetch depKey
+    newDep <- createDependencyRecord depKey depValue
+    return $ eqTagged depKey depKey dep newDep
   return $ if upToDate
     then Just value_
     else Nothing
@@ -67,9 +54,9 @@ record
   :: GCompare f
   => f a
   -> a
-  -> DMap f (Const Int)
-  -> Traces f
-  -> Traces f
+  -> DMap f g
+  -> Traces f g
+  -> Traces f g
 record k v deps
   = DMap.insert k
   $ ValueDeps v deps

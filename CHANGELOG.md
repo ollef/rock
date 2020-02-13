@@ -2,7 +2,7 @@
 
 - Add `trackM` function
 - Remove `invalidateReverseDependencies` in favour of `reachableReverseDependencies`
-- Start using _only_ hashes when verifying traces
+- Generalise `verifyTraces` to verify using user-supplied data
 
 # 0.2.0.0
 

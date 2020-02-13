@@ -1,4 +1,5 @@
 {-# language CPP #-}
+{-# language ViewPatterns #-}
 {-# language DefaultSignatures #-}
 {-# language DeriveFunctor #-}
 {-# language FlexibleInstances #-}
@@ -18,8 +19,6 @@ import Protolude
 
 import Control.Monad.Cont
 import Control.Monad.Identity
-import qualified Data.Map as Map
-import qualified Data.Set as Set
 import qualified Control.Monad.RWS.Lazy as Lazy
 import qualified Control.Monad.RWS.Strict as Strict
 import qualified Control.Monad.State.Lazy as Lazy
@@ -29,10 +28,12 @@ import qualified Control.Monad.Writer.Lazy as Lazy
 import qualified Control.Monad.Writer.Strict as Strict
 import Data.Dependent.Map(DMap, GCompare)
 import qualified Data.Dependent.Map as DMap
+import Data.Dependent.Sum
 import Data.GADT.Compare
+import qualified Data.Map as Map
+import qualified Data.Set as Set
 import Data.Some
 
-import Rock.HashTag
 import Rock.Traces(Traces)
 import qualified Rock.Traces as Traces
 
@@ -293,20 +294,20 @@ memoise startedVar rules (key :: f a) =
 -- If all dependencies of a 'NonInput' query are the same, reuse the old result.
 -- 'Input' queries are not reused.
 verifyTraces
-  :: (GCompare f, HashTag f)
-  => MVar (Traces f)
-  -> MVar (DMap f (Const Int))
+  :: (GCompare f, EqTag f dep)
+  => MVar (Traces f dep)
+  -> (forall a. f a -> a -> Task f (dep a))
   -> GenRules (Writer TaskKind f) f
   -> Rules f
-verifyTraces tracesVar hashesVar rules key = do
+verifyTraces tracesVar createDependencyRecord rules key = do
   traces <- liftIO $ readMVar tracesVar
   maybeValue <- case DMap.lookup key traces of
     Nothing -> return Nothing
     Just oldValueDeps ->
-      Traces.verifyDependencies fetch hashesVar oldValueDeps
+      Traces.verifyDependencies fetch createDependencyRecord oldValueDeps
   case maybeValue of
     Nothing -> do
-      ((value, taskKind), deps) <- track (\k -> Const . hashTagged k) $ rules $ Writer key
+      ((value, taskKind), deps) <- trackM createDependencyRecord $ rules $ Writer key
       case taskKind of
         Input ->
           return ()
