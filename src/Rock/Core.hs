@@ -369,17 +369,16 @@ trackReverseDependencies reverseDepsVar rules key = do
     liftIO $ modifyMVar_ reverseDepsVar $ pure . Map.unionWith (<>) newReverseDeps
   pure res
 
--- | @'invalidateReverseDependencies' key@ removes all keys reachable, by
+-- | @'reachableReverseDependencies' key@ returns all keys reachable, by
 -- reverse dependency, from @key@ from the input 'DMap'. It also returns the
 -- reverse dependency map with those same keys removed.
-invalidateReverseDependencies
+reachableReverseDependencies
   :: GCompare f
   => f a
   -> ReverseDependencies f
-  -> DMap f g
-  -> (ReverseDependencies f, DMap f g)
-invalidateReverseDependencies key reverseDeps m =
+  -> (DMap f (Const ()), ReverseDependencies f)
+reachableReverseDependencies key reverseDeps =
   foldl'
-    (\(reverseDeps', m') (This key') -> invalidateReverseDependencies key' reverseDeps' m')
-    (Map.delete (This key) reverseDeps, DMap.delete key m)
+    (\(m', reverseDeps') (This key') -> first (<> m') $ reachableReverseDependencies key' reverseDeps')
+    (DMap.singleton key $ Const (), Map.delete (This key) reverseDeps)
     (Set.toList $ Map.findWithDefault mempty (This key) reverseDeps)

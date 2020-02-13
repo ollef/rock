@@ -1,5 +1,6 @@
 # Unreleased
 
+- Remove `invalidateReverseDependencies` in favour of `reachableReverseDependencies`
 - Start using _only_ hashes when verifying traces
 
 # 0.2.0.0
