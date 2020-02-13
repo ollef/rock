@@ -1,5 +1,6 @@
 # Unreleased
 
+- Add `trackM` function
 - Remove `invalidateReverseDependencies` in favour of `reachableReverseDependencies`
 - Start using _only_ hashes when verifying traces
 

@@ -233,19 +233,29 @@ runBlock strategy rules (Ap bf bx) =
 -------------------------------------------------------------------------------
 -- * Task combinators
 
--- | Track the query dependencies of a 'Task' in a 'DMap'
+-- | Track the query dependencies of a 'Task' in a 'DMap'.
 track
   :: forall f g a. GCompare f
   => (forall a'. f a' -> a' -> g a')
   -> Task f a
   -> Task f (a, DMap f g)
-track f task = do
+track f =
+  trackM $ \key -> pure . f key
+
+-- | Track the query dependencies of a 'Task' in a 'DMap'. Monadic version.
+trackM
+  :: forall f g a. GCompare f
+  => (forall a'. f a' -> a' -> Task f (g a'))
+  -> Task f a
+  -> Task f (a, DMap f g)
+trackM f task = do
   depsVar <- liftIO $ newMVar mempty
   let
     record :: f b -> Task f b
     record key = do
       value <- fetch key
-      liftIO $ modifyMVar_ depsVar $ pure . DMap.insert key (f key value)
+      g <- f key value
+      liftIO $ modifyMVar_ depsVar $ pure . DMap.insert key g
       return value
   result <- transFetch record task
   deps <- liftIO $ readMVar depsVar
