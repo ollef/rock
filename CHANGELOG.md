@@ -1,5 +1,6 @@
 # Unreleased
 
+- Add `runMemoisedTask`
 - Use `IORef`s instead of `MVar`s
 - Add `trackM` function
 - Remove `invalidateReverseDependencies` in favour of `reachableReverseDependencies`

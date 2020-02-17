@@ -233,6 +233,63 @@ runBlock strategy rules (Fetch key) =
 runBlock strategy rules (Ap bf bx) =
   strategy (runBlockedTask strategy rules bf) (runBlockedTask strategy rules bx)
 
+-- | Perform a 'Task', fetching dependency queries from the given 'Rules'
+-- function.  Memoise previously fetched queries in the 'DMap', and run fetches
+-- in 'Applicative' context in parallel if they haven't already been memoised.
+--
+-- This is a more efficient version of a combination of @'runTask' 'inParallel'@ and
+-- 'memoise'.
+runMemoisedTask :: GCompare f => IORef (DMap f MVar) -> Rules f -> Task f a -> IO a
+runMemoisedTask startedVar rules task = do
+  result <- unTask task
+  case result of
+    Done a -> return a
+    Blocked b -> join $ snd <$> runMemoisedBlockedTask startedVar rules b
+
+runMemoisedBlockedTask :: GCompare f => IORef (DMap f MVar) -> Rules f -> BlockedTask f a -> IO (Bool, IO a)
+runMemoisedBlockedTask startedVar rules (BlockedTask b f) = do
+  (cached, ioa) <- runMemoisedBlock startedVar rules b
+  return
+    ( cached
+    , do
+      a <- ioa
+      runMemoisedTask startedVar rules $ f a
+    )
+
+runMemoisedBlock :: GCompare f => IORef (DMap f MVar) -> Rules f -> Block f a -> IO (Bool, IO a)
+runMemoisedBlock startedVar rules (Fetch key) = do
+  maybeValueVar <- DMap.lookup key <$> readIORef startedVar
+  case maybeValueVar of
+    Nothing -> do
+      valueVar <- newEmptyMVar
+      atomicModifyIORef startedVar $ \started ->
+        case DMap.insertLookupWithKey (\_ _ oldValueVar -> oldValueVar) key valueVar started of
+          (Nothing, started') ->
+            ( started'
+            , ( False
+              , do
+                value <- runMemoisedTask startedVar rules $ rules key
+                putMVar valueVar value
+                return value
+              )
+            )
+          (Just valueVar', _started') ->
+            (started, (True, readMVar valueVar'))
+
+    Just valueVar ->
+      return (True, readMVar valueVar)
+runMemoisedBlock startedVar rules (Ap bf bx) = do
+  (fcached, iof) <- runMemoisedBlockedTask startedVar rules bf
+  (xcached, iox) <- runMemoisedBlockedTask startedVar rules bx
+  return
+    ( fcached && xcached
+    , case (fcached, xcached) of
+      (False, False) -> inParallel iof iox
+      (False, True) -> iof <*> iox
+      (True, False) -> iox <**> iof
+      (True, True) -> iof <*> iox
+    )
+
 -------------------------------------------------------------------------------
 -- * Task combinators
 
