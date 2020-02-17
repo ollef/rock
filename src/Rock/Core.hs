@@ -1,5 +1,4 @@
 {-# language CPP #-}
-{-# language ViewPatterns #-}
 {-# language DefaultSignatures #-}
 {-# language DeriveFunctor #-}
 {-# language FlexibleInstances #-}
@@ -8,7 +7,9 @@
 {-# language GeneralizedNewtypeDeriving #-}
 {-# language RankNTypes #-}
 {-# language ScopedTypeVariables #-}
+{-# language TupleSections #-}
 {-# language UndecidableInstances #-}
+{-# language ViewPatterns #-}
 module Rock.Core where
 
 #if MIN_VERSION_base(4,12,0)
@@ -30,6 +31,7 @@ import Data.Dependent.Map(DMap, GCompare)
 import qualified Data.Dependent.Map as DMap
 import Data.Dependent.Sum
 import Data.GADT.Compare
+import Data.IORef
 import qualified Data.Map as Map
 import qualified Data.Set as Set
 import Data.Some
@@ -250,16 +252,16 @@ trackM
   -> Task f a
   -> Task f (a, DMap f g)
 trackM f task = do
-  depsVar <- liftIO $ newMVar mempty
+  depsVar <- liftIO $ newIORef mempty
   let
     record :: f b -> Task f b
     record key = do
       value <- fetch key
       g <- f key value
-      liftIO $ modifyMVar_ depsVar $ pure . DMap.insert key g
+      liftIO $ atomicModifyIORef depsVar $ (, ()) . DMap.insert key g
       return value
   result <- transFetch record task
-  deps <- liftIO $ readMVar depsVar
+  deps <- liftIO $ readIORef depsVar
   return (result, deps)
 
 -- | Remember what @f@ queries have already been performed and their results in
@@ -270,23 +272,28 @@ trackM f task = do
 memoise
   :: forall f g
   . GCompare f
-  => MVar (DMap f MVar)
+  => IORef (DMap f MVar)
   -> GenRules f g
   -> GenRules f g
-memoise startedVar rules (key :: f a) =
-  join $ liftIO $ modifyMVar startedVar $ \started ->
-    case DMap.lookup key started of
-      Nothing -> do
-        valueVar <- newEmptyMVar
-        return
-          ( DMap.insert key valueVar started
-          , do
-            value <- rules key
-            liftIO $ putMVar valueVar value
-            return value
-          )
-      Just valueVar ->
-        return (started, liftIO $ readMVar valueVar)
+memoise startedVar rules (key :: f a) = do
+  maybeValueVar <- DMap.lookup key <$> liftIO (readIORef startedVar)
+  join $ liftIO $ case maybeValueVar of
+    Nothing -> do
+      valueVar <- newEmptyMVar
+      atomicModifyIORef startedVar $ \started ->
+        case DMap.insertLookupWithKey (\_ _ oldValueVar -> oldValueVar) key valueVar started of
+          (Nothing, started') ->
+            ( started'
+            , do
+              value <- rules key
+              liftIO $ putMVar valueVar value
+              return value
+            )
+          (Just valueVar', _started') ->
+            (started, liftIO $ readMVar valueVar')
+
+    Just valueVar ->
+      return $ liftIO $ readMVar valueVar
 
 -- | Remember the results of previous @f@ queries and what their dependencies
 -- were then.
@@ -295,12 +302,12 @@ memoise startedVar rules (key :: f a) =
 -- 'Input' queries are not reused.
 verifyTraces
   :: (GCompare f, EqTag f dep)
-  => MVar (Traces f dep)
+  => IORef (Traces f dep)
   -> (forall a. f a -> a -> Task f (dep a))
   -> GenRules (Writer TaskKind f) f
   -> Rules f
 verifyTraces tracesVar createDependencyRecord rules key = do
-  traces <- liftIO $ readMVar tracesVar
+  traces <- liftIO $ readIORef tracesVar
   maybeValue <- case DMap.lookup key traces of
     Nothing -> return Nothing
     Just oldValueDeps ->
@@ -312,9 +319,8 @@ verifyTraces tracesVar createDependencyRecord rules key = do
         Input ->
           return ()
         NonInput ->
-          liftIO $ modifyMVar_ tracesVar
-            $ pure
-            . Traces.record key value deps
+          liftIO $ atomicModifyIORef tracesVar
+            $ (, ()) . Traces.record key value deps
       return value
     Just value -> return value
 
@@ -365,10 +371,10 @@ traceFetch before after rules key = do
 
 type ReverseDependencies f = Map (Some f) (Set (Some f))
 
--- | Write reverse dependencies to the 'MVar'.
+-- | Write reverse dependencies to the 'IORef.
 trackReverseDependencies
   :: GCompare f
-  => MVar (ReverseDependencies f)
+  => IORef (ReverseDependencies f)
   -> Rules f
   -> Rules f
 trackReverseDependencies reverseDepsVar rules key = do
@@ -378,7 +384,7 @@ trackReverseDependencies reverseDepsVar rules key = do
           [ (This depKey, Set.singleton $ This key)
           | depKey DMap.:=> Const () <- DMap.toList deps
           ]
-    liftIO $ modifyMVar_ reverseDepsVar $ pure . Map.unionWith (<>) newReverseDeps
+    liftIO $ atomicModifyIORef reverseDepsVar $ (, ()) . Map.unionWith (<>) newReverseDeps
   pure res
 
 -- | @'reachableReverseDependencies' key@ returns all keys reachable, by
