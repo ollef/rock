@@ -202,7 +202,7 @@ inParallel mf mx = withAsync mf $ \af -> do
 -- When used with 'Task', i.e. if you construct @m :: 'Sequential' ('Task' f)
 -- a@, this means that fetches within @m@ are done sequentially.
 newtype Sequential m a = Sequential { runSequential :: m a }
-  deriving (Functor, Monad, MonadIO, MonadFetch f)
+  deriving (Functor, MonadIO, MonadFetch f)
 
 -- | Defined in terms of 'return' and '(>>=)'.
 instance Monad m => Applicative (Sequential m) where
@@ -210,6 +210,10 @@ instance Monad m => Applicative (Sequential m) where
   pure = Sequential . return
   {-# INLINE (<*>) #-}
   Sequential mf <*> Sequential mx = Sequential $ mf >>= \f -> fmap f mx
+
+instance Monad m => Monad (Sequential m) where
+  Sequential m >>= f =
+    Sequential $ m >>= runSequential . f
 
 -------------------------------------------------------------------------------
 -- * Running tasks

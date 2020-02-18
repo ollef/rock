@@ -1,5 +1,6 @@
 # Unreleased
 
+- Explicitly implement `Monad` for `Sequential`
 - Add `runMemoisedTask`
 - Use `IORef`s instead of `MVar`s
 - Add `trackM` function
