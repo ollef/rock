@@ -8,6 +8,7 @@
 {-# language RankNTypes #-}
 {-# language ScopedTypeVariables #-}
 {-# language TupleSections #-}
+{-# language TypeFamilies #-}
 {-# language UndecidableInstances #-}
 {-# language ViewPatterns #-}
 module Rock.Core where
@@ -24,6 +25,8 @@ import qualified Control.Monad.RWS.Lazy as Lazy
 import qualified Control.Monad.RWS.Strict as Strict
 import qualified Control.Monad.State.Lazy as Lazy
 import qualified Control.Monad.State.Strict as Strict
+import Control.Monad.Base
+import Control.Monad.Trans.Control
 import Control.Monad.Trans.Maybe
 import qualified Control.Monad.Writer.Lazy as Lazy
 import qualified Control.Monad.Writer.Strict as Strict
@@ -56,16 +59,10 @@ newtype Task f a = Task { unTask :: IO (Result f a) }
 
 -- | The result of a @Task@, which is either done or wanting to make one or
 -- more @f@ queries.
-data Result f a
-  = Done a
-  | Blocked !(BlockedTask f a)
-
-data BlockedTask f a where
-  BlockedTask :: Block f a -> (a -> Task f b) -> BlockedTask f b
-
-data Block f a where
-  Fetch :: f a -> Block f a
-  Ap :: !(BlockedTask f (a -> b)) -> !(BlockedTask f a) -> Block f b
+data Result f a where
+  Done :: a -> Result f a
+  Fetch :: f a -> (a -> Task f b) -> Result f b
+  LiftBaseWith :: (RunInBase (Task f) IO -> IO a) -> (a -> Task f b) -> Result f b
 
 -------------------------------------------------------------------------------
 -- * Fetch class
@@ -98,9 +95,6 @@ instance Functor (Task f) where
   {-# INLINE fmap #-}
   fmap f (Task t) = Task $ fmap f <$> t
 
--- Note: This instance might not fully evaluate @t1@ before @t2@ in
--- @t1 '<*>' t2@ in case @t1@ performs a query using 'fetch'. If this
--- is not desirable, use 'Sequential'.
 instance Applicative (Task f) where
   {-# INLINE pure #-}
   pure = Task . pure . Done
@@ -115,39 +109,37 @@ instance Monad (Task f) where
     ra <- ma
     case ra of
       Done a -> unTask $ f a
-      Blocked (BlockedTask b k) -> return $ Blocked $ BlockedTask b $ k >=> f
+      Fetch key k -> return $ Fetch key $ k >=> f
+      LiftBaseWith g k -> return $ LiftBaseWith g $ k >=> f
 
 instance MonadIO (Task f) where
   {-# INLINE liftIO #-}
   liftIO io = Task $ pure <$> io
 
+instance MonadBase IO (Task f) where
+  liftBase = liftIO
+
+instance MonadBaseControl IO (Task f) where
+  type StM (Task f) a = a
+  liftBaseWith k = Task $ pure $ LiftBaseWith k pure
+  restoreM = pure
+
 instance MonadFetch f (Task f) where
-  fetch key = Task $ pure $ Blocked $ BlockedTask (Fetch key) pure
+  fetch key = Task $ pure $ Fetch key pure
 
 instance Functor (Result f) where
   {-# INLINE fmap #-}
   fmap f (Done x) = Done $ f x
-  fmap f (Blocked b) = Blocked $ f <$> b
+  fmap f (Fetch key k) = Fetch key $ fmap f <$> k
+  fmap f (LiftBaseWith g k) = LiftBaseWith g $ fmap f <$> k
 
 instance Applicative (Result f) where
   {-# INLINE pure #-}
   pure = Done
   {-# INLINE (<*>) #-}
-  Done f <*> Done x = Done $ f x
-  Done f <*> Blocked b = Blocked $ f <$> b
-  Blocked b <*> Done x = Blocked $ ($ x) <$> b
-  Blocked b1 <*> Blocked b2 = Blocked $ BlockedTask (Ap b1 b2) pure
-
-instance Monad (Result f) where
-  {-# INLINE (>>) #-}
-  (>>) = (*>)
-  {-# INLINE (>>=) #-}
-  Done x >>= f = f x
-  Blocked (BlockedTask b t) >>= f = Blocked $ BlockedTask b $ t >=> Task . pure . f
-
-instance Functor (BlockedTask f) where
-  {-# INLINE fmap #-}
-  fmap f (BlockedTask b t) = BlockedTask b $ fmap f <$> t
+  Done f <*> y = f <$> y
+  Fetch key k <*> y = Fetch key (\a -> k a <*> Task (pure y))
+  LiftBaseWith g k <*> y = LiftBaseWith g (\a -> k a <*> Task (pure y))
 
 -------------------------------------------------------------------------------
 -- * Transformations
@@ -161,138 +153,21 @@ transFetch f task = Task $ do
   result <- unTask task
   case result of
     Done a -> return $ Done a
-    Blocked b -> unTask $ transFetchBlockedTask f b
-
-transFetchBlockedTask
-  :: (forall b. f b -> Task f' b)
-  -> BlockedTask f a
-  -> Task f' a
-transFetchBlockedTask f (BlockedTask b t) = do
-  a <- transFetchBlock f b
-  transFetch f $ t a
-
-transFetchBlock
-  :: (forall b. f b -> Task f' b)
-  -> Block f a
-  -> Task f' a
-transFetchBlock f (Fetch k) = f k
-transFetchBlock f (Ap b1 b2) = transFetchBlockedTask f b1 <*> transFetchBlockedTask f b2
-
--------------------------------------------------------------------------------
--- * Strategies
-
--- | A 'Strategy' specifies how two queries are performed in an 'Applicative'
--- context.
-type Strategy = forall a b. IO (a -> b) -> IO a -> IO b
-
--- | Runs the two queries in sequence.
-sequentially :: Strategy
-sequentially = (<*>)
-
--- | Runs the two queries in parallel.
-inParallel :: Strategy
-inParallel mf mx = withAsync mf $ \af -> do
-  x <- mx
-  f <- wait af
-  return $ f x
-
--- | Uses the underlying instances, except for the Applicative instance which
--- is defined in terms of 'return' and '(>>=)'.
---
--- When used with 'Task', i.e. if you construct @m :: 'Sequential' ('Task' f)
--- a@, this means that fetches within @m@ are done sequentially.
-newtype Sequential m a = Sequential { runSequential :: m a }
-  deriving (Functor, MonadIO, MonadFetch f)
-
--- | Defined in terms of 'return' and '(>>=)'.
-instance Monad m => Applicative (Sequential m) where
-  {-# INLINE pure #-}
-  pure = Sequential . return
-  {-# INLINE (<*>) #-}
-  Sequential mf <*> Sequential mx = Sequential $ mf >>= \f -> fmap f mx
-
-instance Monad m => Monad (Sequential m) where
-  Sequential m >>= f =
-    Sequential $ m >>= runSequential . f
+    Fetch key k -> unTask $ f key >>= transFetch f . k
+    LiftBaseWith g k -> return $
+      LiftBaseWith (\runInBase -> g (runInBase . transFetch f)) (transFetch f . k)
 
 -------------------------------------------------------------------------------
 -- * Running tasks
 
 -- | Perform a 'Task', fetching dependency queries from the given 'Rules' function and using the given 'Strategy' for fetches in an 'Applicative' context.
-runTask :: Strategy -> Rules f -> Task f a -> IO a
-runTask strategy rules task = do
+runTask :: Rules f -> Task f a -> IO a
+runTask rules task = do
   result <- unTask task
   case result of
     Done a -> return a
-    Blocked b -> runBlockedTask strategy rules b
-
-runBlockedTask :: Strategy -> Rules f -> BlockedTask f a -> IO a
-runBlockedTask strategy rules (BlockedTask b f) = do
-  a <- runBlock strategy rules b
-  runTask strategy rules $ f a
-
-runBlock :: Strategy -> Rules f -> Block f a -> IO a
-runBlock strategy rules (Fetch key) =
-  runTask strategy rules $ rules key
-runBlock strategy rules (Ap bf bx) =
-  strategy (runBlockedTask strategy rules bf) (runBlockedTask strategy rules bx)
-
--- | Perform a 'Task', fetching dependency queries from the given 'Rules'
--- function.  Memoise previously fetched queries in the 'DMap', and run fetches
--- in 'Applicative' context in parallel if they haven't already been memoised.
---
--- This is a more efficient version of a combination of @'runTask' 'inParallel'@ and
--- 'memoise'.
-runMemoisedTask :: GCompare f => IORef (DMap f MVar) -> Rules f -> Task f a -> IO a
-runMemoisedTask startedVar rules task = do
-  result <- unTask task
-  case result of
-    Done a -> return a
-    Blocked b -> join $ snd <$> runMemoisedBlockedTask startedVar rules b
-
-runMemoisedBlockedTask :: GCompare f => IORef (DMap f MVar) -> Rules f -> BlockedTask f a -> IO (Bool, IO a)
-runMemoisedBlockedTask startedVar rules (BlockedTask b f) = do
-  (cached, ioa) <- runMemoisedBlock startedVar rules b
-  return
-    ( cached
-    , do
-      a <- ioa
-      runMemoisedTask startedVar rules $ f a
-    )
-
-runMemoisedBlock :: GCompare f => IORef (DMap f MVar) -> Rules f -> Block f a -> IO (Bool, IO a)
-runMemoisedBlock startedVar rules (Fetch key) = do
-  maybeValueVar <- DMap.lookup key <$> readIORef startedVar
-  case maybeValueVar of
-    Nothing -> do
-      valueVar <- newEmptyMVar
-      atomicModifyIORef startedVar $ \started ->
-        case DMap.insertLookupWithKey (\_ _ oldValueVar -> oldValueVar) key valueVar started of
-          (Nothing, started') ->
-            ( started'
-            , ( False
-              , do
-                value <- runMemoisedTask startedVar rules $ rules key
-                putMVar valueVar value
-                return value
-              )
-            )
-          (Just valueVar', _started') ->
-            (started, (True, readMVar valueVar'))
-
-    Just valueVar ->
-      return (True, readMVar valueVar)
-runMemoisedBlock startedVar rules (Ap bf bx) = do
-  (fcached, iof) <- runMemoisedBlockedTask startedVar rules bf
-  (xcached, iox) <- runMemoisedBlockedTask startedVar rules bx
-  return
-    ( fcached && xcached
-    , case (fcached, xcached) of
-      (False, False) -> inParallel iof iox
-      (False, True) -> iof <*> iox
-      (True, False) -> iox <**> iof
-      (True, True) -> iof <*> iox
-    )
+    Fetch key k -> runTask rules (rules key) >>= runTask rules . k
+    LiftBaseWith g k -> g (runTask rules) >>= runTask rules . k
 
 -------------------------------------------------------------------------------
 -- * Task combinators

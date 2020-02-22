@@ -1,7 +1,9 @@
 # Unreleased
 
-- Explicitly implement `Monad` for `Sequential`
-- Add `runMemoisedTask`
+- Remove support for Haxl-style automatic parallelisation
+  * Remove strategy parameter from `runTask`
+  * Add `MonadBaseControl`, which allows manual parallelisation using e.g. lifted-async
+  * Remove `Sequential` type
 - Use `IORef`s instead of `MVar`s
 - Add `trackM` function
 - Remove `invalidateReverseDependencies` in favour of `reachableReverseDependencies`
