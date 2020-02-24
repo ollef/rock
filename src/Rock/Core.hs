@@ -117,14 +117,18 @@ instance MonadIO (Task f) where
   liftIO io = Task $ pure <$> io
 
 instance MonadBase IO (Task f) where
+  {-# INLINE liftBase #-}
   liftBase = liftIO
 
 instance MonadBaseControl IO (Task f) where
   type StM (Task f) a = a
+  {-# INLINE liftBaseWith #-}
   liftBaseWith k = Task $ pure $ LiftBaseWith k pure
+  {-# INLINE restoreM #-}
   restoreM = pure
 
 instance MonadFetch f (Task f) where
+  {-# INLINE fetch #-}
   fetch key = Task $ pure $ Fetch key pure
 
 instance Functor (Result f) where
