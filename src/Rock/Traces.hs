@@ -1,3 +1,4 @@
+{-# language FlexibleContexts #-}
 {-# language RankNTypes #-}
 {-# language StandaloneDeriving #-}
 {-# language TemplateHaskell #-}
@@ -6,34 +7,38 @@ module Rock.Traces where
 
 import Protolude
 
-import Data.Dependent.Map(DMap, GCompare, DSum((:=>)))
-import qualified Data.Dependent.Map as DMap
+import Data.Constraint.Extras
+import Data.Dependent.HashMap(DHashMap)
+import qualified Data.Dependent.HashMap as DHashMap
 import Data.Dependent.Sum
 import Data.Functor.Classes
+import Data.GADT.Compare
+import Data.GADT.Show
+import Data.Some
 import Text.Show.Deriving
 
 data ValueDeps f dep a = ValueDeps
   { value :: !a
-  , dependencies :: !(DMap f dep)
+  , dependencies :: !(DHashMap f dep)
   }
 
 return []
 
-deriving instance (Show a, ShowTag f dep) => Show (ValueDeps f dep a)
+deriving instance (Show a, GShow f, Has' Show f dep) => Show (ValueDeps f dep a)
 
-instance ShowTag f dep => Show1 (ValueDeps f dep) where
+instance (GShow f, Has' Show f dep) => Show1 (ValueDeps f dep) where
   liftShowsPrec = $(makeLiftShowsPrec ''ValueDeps)
 
-type Traces f dep = DMap f (ValueDeps f dep)
+type Traces f dep = DHashMap f (ValueDeps f dep)
 
 verifyDependencies
-  :: (MonadIO m, EqTag f dep)
+  :: (MonadIO m, GEq f, Has' Eq f dep)
   => (forall a'. f a' -> m a')
   -> (forall a'. f a' -> a' -> m (dep a'))
   -> ValueDeps f dep a
   -> m (Maybe a)
 verifyDependencies fetch createDependencyRecord (ValueDeps value_ deps) = do
-  upToDate <- allM (DMap.toList deps) $ \(depKey :=> dep) -> do
+  upToDate <- allM (DHashMap.toList deps) $ \(depKey :=> dep) -> do
     depValue <- fetch depKey
     newDep <- createDependencyRecord depKey depValue
     return $ eqTagged depKey depKey dep newDep
@@ -51,12 +56,12 @@ verifyDependencies fetch createDependencyRecord (ValueDeps value_ deps) = do
         return False
 
 record
-  :: GCompare f
+  :: (GEq f, Hashable (Some f))
   => f a
   -> a
-  -> DMap f g
+  -> DHashMap f g
   -> Traces f g
   -> Traces f g
 record k v deps
-  = DMap.insert k
+  = DHashMap.insert k
   $ ValueDeps v deps

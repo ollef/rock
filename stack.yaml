@@ -1,3 +1,7 @@
-resolver: lts-14.0
+resolver: lts-15.1
 packages:
 - .
+extra-deps:
+- dependent-hashmap-0.1.0.0
+- constraints-extras-0.3.0.2
+- dependent-sum-0.6.2.0

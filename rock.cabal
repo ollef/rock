@@ -36,7 +36,6 @@ library
                        Rock.Traces
   build-depends:       base >= 4.7 && < 5
                      , containers
-                     , dependent-map
                      , dependent-sum
                      , deriving-compat
                      , monad-control
@@ -44,6 +43,7 @@ library
                      , protolude
                      , transformers
                      , transformers-base
+                     , dependent-hashmap >= 0.1
   default-language:    Haskell2010
   default-extensions:  OverloadedStrings, NoImplicitPrelude
 

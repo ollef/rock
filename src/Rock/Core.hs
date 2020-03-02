@@ -1,16 +1,14 @@
 {-# language CPP #-}
 {-# language DefaultSignatures #-}
-{-# language DeriveFunctor #-}
+{-# language FlexibleContexts #-}
 {-# language FlexibleInstances #-}
 {-# language FunctionalDependencies #-}
 {-# language GADTs #-}
-{-# language GeneralizedNewtypeDeriving #-}
 {-# language RankNTypes #-}
 {-# language ScopedTypeVariables #-}
 {-# language TupleSections #-}
 {-# language TypeFamilies #-}
 {-# language UndecidableInstances #-}
-{-# language ViewPatterns #-}
 module Rock.Core where
 
 #if MIN_VERSION_base(4,12,0)
@@ -19,24 +17,27 @@ import Protolude hiding (Ap)
 import Protolude
 #endif
 
+import Control.Monad.Base
 import Control.Monad.Cont
 import Control.Monad.Identity
 import qualified Control.Monad.RWS.Lazy as Lazy
 import qualified Control.Monad.RWS.Strict as Strict
 import qualified Control.Monad.State.Lazy as Lazy
 import qualified Control.Monad.State.Strict as Strict
-import Control.Monad.Base
 import Control.Monad.Trans.Control
 import Control.Monad.Trans.Maybe
 import qualified Control.Monad.Writer.Lazy as Lazy
+import Data.Constraint.Extras
 import qualified Control.Monad.Writer.Strict as Strict
-import Data.Dependent.Map(DMap, GCompare)
-import qualified Data.Dependent.Map as DMap
+import Data.Dependent.HashMap (DHashMap)
+import qualified Data.Dependent.HashMap as DHashMap
+import Data.HashMap.Lazy (HashMap)
+import qualified Data.HashMap.Lazy as HashMap
+import Data.HashSet (HashSet)
+import qualified Data.HashSet as HashSet
 import Data.Dependent.Sum
 import Data.GADT.Compare
 import Data.IORef
-import qualified Data.Map as Map
-import qualified Data.Set as Set
 import Data.Some
 
 import Rock.Traces(Traces)
@@ -176,21 +177,21 @@ runTask rules task = do
 -------------------------------------------------------------------------------
 -- * Task combinators
 
--- | Track the query dependencies of a 'Task' in a 'DMap'.
+-- | Track the query dependencies of a 'Task' in a 'DHashMap'.
 track
-  :: forall f g a. GCompare f
+  :: forall f g a. (GEq f, Hashable (Some f))
   => (forall a'. f a' -> a' -> g a')
   -> Task f a
-  -> Task f (a, DMap f g)
+  -> Task f (a, DHashMap f g)
 track f =
   trackM $ \key -> pure . f key
 
--- | Track the query dependencies of a 'Task' in a 'DMap'. Monadic version.
+-- | Track the query dependencies of a 'Task' in a 'DHashMap'. Monadic version.
 trackM
-  :: forall f g a. GCompare f
+  :: forall f g a. (GEq f, Hashable (Some f))
   => (forall a'. f a' -> a' -> Task f (g a'))
   -> Task f a
-  -> Task f (a, DMap f g)
+  -> Task f (a, DHashMap f g)
 trackM f task = do
   depsVar <- liftIO $ newIORef mempty
   let
@@ -198,30 +199,30 @@ trackM f task = do
     record key = do
       value <- fetch key
       g <- f key value
-      liftIO $ atomicModifyIORef depsVar $ (, ()) . DMap.insert key g
+      liftIO $ atomicModifyIORef depsVar $ (, ()) . DHashMap.insert key g
       return value
   result <- transFetch record task
   deps <- liftIO $ readIORef depsVar
   return (result, deps)
 
 -- | Remember what @f@ queries have already been performed and their results in
--- a 'DMap', and reuse them if a query is performed again a second time.
+-- a 'DHashMap', and reuse them if a query is performed again a second time.
 --
--- The 'DMap' should typically not be reused if there has been some change that
+-- The 'DHashMap' should typically not be reused if there has been some change that
 -- might make a query return a different result.
 memoise
   :: forall f g
-  . GCompare f
-  => IORef (DMap f MVar)
+  . (GEq f, Hashable (Some f))
+  => IORef (DHashMap f MVar)
   -> GenRules f g
   -> GenRules f g
 memoise startedVar rules (key :: f a) = do
-  maybeValueVar <- DMap.lookup key <$> liftIO (readIORef startedVar)
+  maybeValueVar <- DHashMap.lookup key <$> liftIO (readIORef startedVar)
   join $ liftIO $ case maybeValueVar of
     Nothing -> do
       valueVar <- newEmptyMVar
       atomicModifyIORef startedVar $ \started ->
-        case DMap.insertLookupWithKey (\_ _ oldValueVar -> oldValueVar) key valueVar started of
+        case DHashMap.alterLookup (Just . fromMaybe valueVar) key started of
           (Nothing, started') ->
             ( started'
             , do
@@ -229,6 +230,7 @@ memoise startedVar rules (key :: f a) = do
               liftIO $ putMVar valueVar value
               return value
             )
+
           (Just valueVar', _started') ->
             (started, liftIO $ readMVar valueVar')
 
@@ -241,14 +243,14 @@ memoise startedVar rules (key :: f a) = do
 -- If all dependencies of a 'NonInput' query are the same, reuse the old result.
 -- 'Input' queries are not reused.
 verifyTraces
-  :: (GCompare f, EqTag f dep)
+  :: (Hashable (Some f), GEq f, Has' Eq f dep)
   => IORef (Traces f dep)
   -> (forall a. f a -> a -> Task f (dep a))
   -> GenRules (Writer TaskKind f) f
   -> Rules f
 verifyTraces tracesVar createDependencyRecord rules key = do
   traces <- liftIO $ readIORef tracesVar
-  maybeValue <- case DMap.lookup key traces of
+  maybeValue <- case DHashMap.lookup key traces of
     Nothing -> return Nothing
     Just oldValueDeps ->
       Traces.verifyDependencies fetch createDependencyRecord oldValueDeps
@@ -309,34 +311,34 @@ traceFetch before after rules key = do
   after key result
   return result
 
-type ReverseDependencies f = Map (Some f) (Set (Some f))
+type ReverseDependencies f = HashMap (Some f) (HashSet (Some f))
 
 -- | Write reverse dependencies to the 'IORef.
 trackReverseDependencies
-  :: GCompare f
+  :: (GEq f, Hashable (Some f))
   => IORef (ReverseDependencies f)
   -> Rules f
   -> Rules f
 trackReverseDependencies reverseDepsVar rules key = do
   (res, deps) <- track (\_ _ -> Const ()) $ rules key
-  unless (DMap.null deps) $ do
-    let newReverseDeps = Map.fromListWith (<>)
-          [ (This depKey, Set.singleton $ This key)
-          | depKey DMap.:=> Const () <- DMap.toList deps
+  unless (DHashMap.null deps) $ do
+    let newReverseDeps = HashMap.fromListWith (<>)
+          [ (Some depKey, HashSet.singleton $ Some key)
+          | depKey :=> Const () <- DHashMap.toList deps
           ]
-    liftIO $ atomicModifyIORef reverseDepsVar $ (, ()) . Map.unionWith (<>) newReverseDeps
+    liftIO $ atomicModifyIORef reverseDepsVar $ (, ()) . HashMap.unionWith (<>) newReverseDeps
   pure res
 
 -- | @'reachableReverseDependencies' key@ returns all keys reachable, by
--- reverse dependency, from @key@ from the input 'DMap'. It also returns the
+-- reverse dependency, from @key@ from the input 'DHashMap'. It also returns the
 -- reverse dependency map with those same keys removed.
 reachableReverseDependencies
-  :: GCompare f
+  :: (GEq f, Hashable (Some f))
   => f a
   -> ReverseDependencies f
-  -> (DMap f (Const ()), ReverseDependencies f)
+  -> (DHashMap f (Const ()), ReverseDependencies f)
 reachableReverseDependencies key reverseDeps =
   foldl'
-    (\(m', reverseDeps') (This key') -> first (<> m') $ reachableReverseDependencies key' reverseDeps')
-    (DMap.singleton key $ Const (), Map.delete (This key) reverseDeps)
-    (Set.toList $ Map.findWithDefault mempty (This key) reverseDeps)
+    (\(m', reverseDeps') (Some key') -> first (<> m') $ reachableReverseDependencies key' reverseDeps')
+    (DHashMap.singleton key $ Const (), HashMap.delete (Some key) reverseDeps)
+    (HashSet.toList $ HashMap.lookupDefault mempty (Some key) reverseDeps)

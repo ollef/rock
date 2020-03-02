@@ -1,5 +1,6 @@
 # Unreleased
 
+- Switch from the `dependent-map` package to the `dependent-hashmap` for caches
 - Remove support for Haxl-style automatic parallelisation
   * Remove strategy parameter from `runTask`
   * Add `MonadBaseControl`, which allows manual parallelisation using e.g. lifted-async
