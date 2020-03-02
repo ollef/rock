@@ -35,15 +35,16 @@ library
                        Rock.Core
                        Rock.Traces
   build-depends:       base >= 4.7 && < 5
-                     , containers
-                     , dependent-sum
-                     , deriving-compat
-                     , monad-control
-                     , mtl
-                     , protolude
-                     , transformers
-                     , transformers-base
+                     , constraints-extras >= 0.3
                      , dependent-hashmap >= 0.1
+                     , dependent-sum >= 0.6
+                     , deriving-compat >= 0.5
+                     , monad-control >= 1.0
+                     , mtl >= 2.2
+                     , protolude >= 0.2
+                     , transformers >= 0.5
+                     , transformers-base >= 0.4
+                     , unordered-containers >= 0.2
   default-language:    Haskell2010
   default-extensions:  OverloadedStrings, NoImplicitPrelude
 
