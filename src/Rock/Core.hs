@@ -11,15 +11,12 @@
 {-# language UndecidableInstances #-}
 module Rock.Core where
 
-#if MIN_VERSION_base(4,12,0)
-import Protolude hiding (Ap)
-#else
-import Protolude
-#endif
-
+import Control.Concurrent.MVar
 import Control.Monad.Base
 import Control.Monad.Cont
+import Control.Monad.Except
 import Control.Monad.Identity
+import Control.Monad.Reader
 import qualified Control.Monad.RWS.Lazy as Lazy
 import qualified Control.Monad.RWS.Strict as Strict
 import qualified Control.Monad.State.Lazy as Lazy
@@ -27,18 +24,24 @@ import qualified Control.Monad.State.Strict as Strict
 import Control.Monad.Trans.Control
 import Control.Monad.Trans.Maybe
 import qualified Control.Monad.Writer.Lazy as Lazy
-import Data.Constraint.Extras
 import qualified Control.Monad.Writer.Strict as Strict
+import Data.Bifunctor
+import Data.Constraint.Extras
 import Data.Dependent.HashMap (DHashMap)
 import qualified Data.Dependent.HashMap as DHashMap
+import Data.Dependent.Sum
+import Data.Foldable
+import Data.Functor.Const
+import Data.GADT.Compare (GEq, GCompare, geq, gcompare, GOrdering(..))
+import Data.Hashable
 import Data.HashMap.Lazy (HashMap)
 import qualified Data.HashMap.Lazy as HashMap
 import Data.HashSet (HashSet)
 import qualified Data.HashSet as HashSet
-import Data.Dependent.Sum
-import Data.GADT.Compare
 import Data.IORef
+import Data.Maybe
 import Data.Some
+import Data.Type.Equality
 
 import Rock.Traces(Traces)
 import qualified Rock.Traces as Traces

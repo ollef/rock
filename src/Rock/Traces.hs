@@ -5,8 +5,7 @@
 {-# language UndecidableInstances #-}
 module Rock.Traces where
 
-import Protolude
-
+import Control.Monad.IO.Class
 import Data.Constraint.Extras
 import Data.Dependent.HashMap(DHashMap)
 import qualified Data.Dependent.HashMap as DHashMap
@@ -14,6 +13,7 @@ import Data.Dependent.Sum
 import Data.Functor.Classes
 import Data.GADT.Compare
 import Data.GADT.Show
+import Data.Hashable
 import Data.Some
 import Text.Show.Deriving
 
