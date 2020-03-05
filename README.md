@@ -1,4 +1,4 @@
-# rock [![Hackage](https://img.shields.io/hackage/v/rock.svg)](https://hackage.haskell.org/package/rock)
+# rock [![Build Status](https://travis-ci.com/ollef/rock.svg?branch=master)](https://travis-ci.com/ollef/rock) [![Hackage](https://img.shields.io/hackage/v/rock.svg)](https://hackage.haskell.org/package/rock)
 
 A build system inspired by [Build systems à la carte](https://www.microsoft.com/en-us/research/publication/build-systems-la-carte/).
 
