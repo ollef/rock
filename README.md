@@ -86,5 +86,4 @@ Fetching C
 
 # Contributions
 
-... are very welcome, especially in the areas of documentation, examples,
-testing, and benchmarking.
+... are very welcome, especially in the areas of documentation and examples.
