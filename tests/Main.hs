@@ -1,3 +1,4 @@
+{-# language CPP #-}
 {-# language FlexibleInstances #-}
 {-# language GADTs #-}
 {-# language MultiParamTypeClasses #-}
@@ -20,6 +21,9 @@ import Data.GADT.Show
 import Data.Hashable
 import Data.IORef
 import Data.List
+#if !MIN_VERSION_base(4,11,0)
+import Data.Semigroup
+#endif
 import Data.Some
 import Hedgehog
 import qualified Hedgehog.Gen as Gen
