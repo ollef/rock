@@ -66,3 +66,29 @@ executable rock-spreadsheet
   hs-source-dirs:      examples
   default-language:    Haskell2010
   build-depends:       base, rock, protolude, dependent-sum-template
+
+test-suite test-rock
+  type:                exitcode-stdio-1.0
+  main-is:             Main.hs
+  hs-source-dirs:      tests
+  ghc-options:         -Wall
+                       -Wcompat
+                       -Widentities
+                       -Wincomplete-record-updates
+                       -Wincomplete-uni-patterns
+                       -Wmissing-home-modules
+                       -Wpartial-fields
+                       -Wredundant-constraints
+                       -Wtabs
+                       -funbox-strict-fields
+  build-depends:       base >=4.7 && <5
+                     , constraints
+                     , constraints-extras
+                     , dependent-hashmap
+                     , dependent-sum
+                     , hashable
+                     , hedgehog
+                     , mtl
+                     , rock
+                     , unordered-containers
+  default-language:  Haskell2010
