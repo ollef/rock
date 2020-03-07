@@ -224,10 +224,10 @@ memoise
   -> GenRules f g
 memoise startedVar rules (key :: f a) = do
   maybeValueVar <- DHashMap.lookup key <$> liftIO (readIORef startedVar)
-  join $ liftIO $ case maybeValueVar of
+  case maybeValueVar of
     Nothing -> do
-      valueVar <- newEmptyMVar
-      atomicModifyIORef startedVar $ \started ->
+      valueVar <- liftIO newEmptyMVar
+      join $ liftIO $ atomicModifyIORef startedVar $ \started ->
         case DHashMap.alterLookup (Just . fromMaybe valueVar) key started of
           (Nothing, started') ->
             ( started'
@@ -241,7 +241,7 @@ memoise startedVar rules (key :: f a) = do
             (started, liftIO $ readMVar valueVar')
 
     Just valueVar ->
-      return $ liftIO $ readMVar valueVar
+      liftIO $ readMVar valueVar
 
 -- | Remember the results of previous @f@ queries and what their dependencies
 -- were then.
