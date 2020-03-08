@@ -3,5 +3,5 @@ module Rock
   , Traces
   ) where
 
-import Rock.Core
+import Rock.Core hiding (Fetch)
 import Rock.Traces

@@ -4,6 +4,7 @@
 {-# language FlexibleInstances #-}
 {-# language FunctionalDependencies #-}
 {-# language GADTs #-}
+{-# language GeneralizedNewtypeDeriving #-}
 {-# language RankNTypes #-}
 {-# language ScopedTypeVariables #-}
 {-# language TupleSections #-}
@@ -62,14 +63,11 @@ type GenRules f g = forall a. f a -> Task g a
 
 -- | An @IO@ action that is allowed to make @f@ queries using the 'fetch'
 -- method from its 'MonadFetch' instance.
-newtype Task f a = Task { unTask :: IO (Result f a) }
+newtype Task f a = Task { unTask :: ReaderT (Fetch f) IO a }
+  deriving
+    (Functor, Applicative, Monad, MonadIO, MonadBase IO)
 
--- | The result of a @Task@, which is either done or wanting to make one or
--- more @f@ queries.
-data Result f a where
-  Done :: a -> Result f a
-  Fetch :: f a -> (a -> Task f b) -> Result f b
-  LiftBaseWith :: (RunInBase (Task f) IO -> IO a) -> (a -> Task f b) -> Result f b
+newtype Fetch f = Fetch (forall a. f a -> IO a)
 
 -------------------------------------------------------------------------------
 -- * Fetch class
@@ -98,59 +96,16 @@ instance (Monoid w, MonadFetch f m) => MonadFetch f (Lazy.WriterT w m)
 -------------------------------------------------------------------------------
 -- Instances
 
-instance Functor (Task f) where
-  {-# INLINE fmap #-}
-  fmap f (Task t) = Task $ fmap f <$> t
-
-instance Applicative (Task f) where
-  {-# INLINE pure #-}
-  pure = Task . pure . Done
-  {-# INLINE (<*>) #-}
-  Task mrf <*> Task mrx = Task $ (<*>) <$> mrf <*> mrx
-
-instance Monad (Task f) where
-  {-# INLINE (>>) #-}
-  (>>) = (*>)
-  {-# INLINE (>>=) #-}
-  Task ma >>= f = Task $ do
-    ra <- ma
-    case ra of
-      Done a -> unTask $ f a
-      Fetch key k -> return $ Fetch key $ k >=> f
-      LiftBaseWith g k -> return $ LiftBaseWith g $ k >=> f
-
-instance MonadIO (Task f) where
-  {-# INLINE liftIO #-}
-  liftIO io = Task $ pure <$> io
-
-instance MonadBase IO (Task f) where
-  {-# INLINE liftBase #-}
-  liftBase = liftIO
-
-instance MonadBaseControl IO (Task f) where
-  type StM (Task f) a = a
-  {-# INLINE liftBaseWith #-}
-  liftBaseWith k = Task $ pure $ LiftBaseWith k pure
-  {-# INLINE restoreM #-}
-  restoreM = pure
-
 instance MonadFetch f (Task f) where
   {-# INLINE fetch #-}
-  fetch key = Task $ pure $ Fetch key pure
+  fetch key = Task $ do
+    io <- asks (\(Fetch fetch_) -> fetch_ key)
+    liftIO io
 
-instance Functor (Result f) where
-  {-# INLINE fmap #-}
-  fmap f (Done x) = Done $ f x
-  fmap f (Fetch key k) = Fetch key $ fmap f <$> k
-  fmap f (LiftBaseWith g k) = LiftBaseWith g $ fmap f <$> k
-
-instance Applicative (Result f) where
-  {-# INLINE pure #-}
-  pure = Done
-  {-# INLINE (<*>) #-}
-  Done f <*> y = f <$> y
-  Fetch key k <*> y = Fetch key (\a -> k a <*> Task (pure y))
-  LiftBaseWith g k <*> y = LiftBaseWith g (\a -> k a <*> Task (pure y))
+instance MonadBaseControl IO (Task f) where
+  type StM (Task f) a = StM (ReaderT (Fetch f) IO) a
+  liftBaseWith k = Task $ liftBaseWith $ \ma -> k $ ma . unTask
+  restoreM = Task . restoreM
 
 -------------------------------------------------------------------------------
 -- * Transformations
@@ -160,25 +115,18 @@ transFetch
   :: (forall b. f b -> Task f' b)
   -> Task f a
   -> Task f' a
-transFetch f task = Task $ do
-  result <- unTask task
-  case result of
-    Done a -> return $ Done a
-    Fetch key k -> unTask $ f key >>= transFetch f . k
-    LiftBaseWith g k -> return $
-      LiftBaseWith (\runInBase -> g (runInBase . transFetch f)) (transFetch f . k)
+transFetch f (Task task) =
+  Task $ ReaderT $ \fetch_ ->
+    runReaderT task $ Fetch $ \key ->
+      runReaderT (unTask $ f key) fetch_
 
 -------------------------------------------------------------------------------
 -- * Running tasks
 
 -- | Perform a 'Task', fetching dependency queries from the given 'Rules' function and using the given 'Strategy' for fetches in an 'Applicative' context.
 runTask :: Rules f -> Task f a -> IO a
-runTask rules task = do
-  result <- unTask task
-  case result of
-    Done a -> return a
-    Fetch key k -> runTask rules (rules key) >>= runTask rules . k
-    LiftBaseWith g k -> g (runTask rules) >>= runTask rules . k
+runTask rules (Task task) =
+  runReaderT task $ Fetch $ runTask rules . rules
 
 -------------------------------------------------------------------------------
 -- * Task combinators
