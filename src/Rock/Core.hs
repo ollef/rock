@@ -123,7 +123,8 @@ transFetch f (Task task) =
 -------------------------------------------------------------------------------
 -- * Running tasks
 
--- | Perform a 'Task', fetching dependency queries from the given 'Rules' function and using the given 'Strategy' for fetches in an 'Applicative' context.
+-- | Perform a 'Task', fetching dependency queries from the given 'Rules'
+-- function.
 runTask :: Rules f -> Task f a -> IO a
 runTask rules (Task task) =
   runReaderT task $ Fetch $ runTask rules . rules
