@@ -290,7 +290,8 @@ memoiseWithCycleDetection startedVar depsVar rules =
 -- If all dependencies of a 'NonInput' query are the same, reuse the old result.
 -- 'Input' queries are not reused.
 verifyTraces
-  :: (Hashable (Some f), GEq f, Has' Eq f dep)
+  :: forall f dep
+  . (Hashable (Some f), GEq f, Has' Eq f dep, Typeable f, GShow f)
   => IORef (Traces f dep)
   -> (forall a. f a -> a -> Task f (dep a))
   -> GenRules (Writer TaskKind f) f
@@ -300,7 +301,8 @@ verifyTraces tracesVar createDependencyRecord rules key = do
   maybeValue <- case DHashMap.lookup key traces of
     Nothing -> return Nothing
     Just oldValueDeps ->
-      Traces.verifyDependencies fetch createDependencyRecord oldValueDeps
+      Traces.verifyDependencies fetch createDependencyRecord oldValueDeps `catch` \(_ :: Cyclic f) ->
+        pure Nothing
   case maybeValue of
     Nothing -> do
       ((value, taskKind), deps) <- trackM createDependencyRecord $ rules $ Writer key
