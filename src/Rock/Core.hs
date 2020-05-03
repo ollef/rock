@@ -12,7 +12,8 @@
 {-# language UndecidableInstances #-}
 module Rock.Core where
 
-import Control.Concurrent.MVar
+import Control.Concurrent
+import Control.Exception.Lifted
 import Control.Monad.Base
 import Control.Monad.Cont
 import Control.Monad.Except
@@ -34,6 +35,7 @@ import Data.Dependent.Sum
 import Data.Foldable
 import Data.Functor.Const
 import Data.GADT.Compare (GEq, GCompare, geq, gcompare, GOrdering(..))
+import Data.GADT.Show (GShow)
 import Data.Hashable
 import Data.HashMap.Lazy (HashMap)
 import qualified Data.HashMap.Lazy as HashMap
@@ -41,11 +43,11 @@ import Data.HashSet (HashSet)
 import qualified Data.HashSet as HashSet
 import Data.IORef
 import Data.Maybe
+import Data.Typeable
 #if !MIN_VERSION_base(4,11,0)
 import Data.Semigroup
 #endif
 import Data.Some
-import Data.Type.Equality
 
 import Rock.Traces(Traces)
 import qualified Rock.Traces as Traces
@@ -191,6 +193,96 @@ memoise startedVar rules (key :: f a) = do
 
     Just valueVar ->
       liftIO $ readMVar valueVar
+
+newtype Cyclic f = Cyclic (Some f)
+  deriving Show
+
+instance (GShow f, Typeable f) => Exception (Cyclic f)
+
+data MemoEntry a
+  = Started !ThreadId !(MVar (Maybe a))
+  | Done !a
+
+-- | Like 'memoise', but throw @'Cyclic' f@ if a query depends on itself, directly or
+-- indirectly.
+--
+-- The 'HashMap' represents dependencies between threads and should not be
+-- reused between invocations.
+memoiseWithCycleDetection
+  :: forall f g
+  . (Typeable f, GShow f, GEq f, Hashable (Some f))
+  => IORef (DHashMap f MemoEntry)
+  -> IORef (HashMap ThreadId ThreadId)
+  -> GenRules f g
+  -> GenRules f g
+memoiseWithCycleDetection startedVar depsVar rules =
+  rules'
+  where
+    rules' (key :: f a) = do
+      maybeEntry <- DHashMap.lookup key <$> liftIO (readIORef startedVar)
+      case maybeEntry of
+        Nothing -> do
+          threadId <- liftIO myThreadId
+          valueVar <- liftIO newEmptyMVar
+          join $ liftIO $ atomicModifyIORef startedVar $ \started ->
+            case DHashMap.alterLookup (Just . fromMaybe (Started threadId valueVar)) key started of
+              (Nothing, started') ->
+                ( started'
+                , (do
+                    value <- rules key
+                    liftIO $ do
+                      atomicModifyIORef startedVar $ \started'' ->
+                        (DHashMap.insert key (Done value) started'', ())
+                      putMVar valueVar $ Just value
+                      return value
+                  ) `catch` \(e :: Cyclic f) ->
+                  (liftIO $ do
+                    atomicModifyIORef startedVar $ \started'' ->
+                      (DHashMap.delete key started'', ())
+                    putMVar valueVar Nothing
+                    throwIO e
+                  )
+                )
+
+              (Just entry, _started') ->
+                (started, waitFor entry)
+
+        Just entry ->
+          waitFor entry
+      where
+        waitFor entry =
+          case entry of
+            Started onThread valueVar -> do
+              threadId <- liftIO myThreadId
+              join $ liftIO $ atomicModifyIORef depsVar $ \deps -> do
+                let
+                  deps' =
+                    HashMap.insert threadId onThread deps
+
+                if detectCycle threadId deps' then
+                  ( deps
+                  , throwIO $ Cyclic $ Some key
+                  )
+                else
+                  ( deps'
+                  , do
+                    maybeValue <- liftIO $ readMVar valueVar
+                    liftIO $ atomicModifyIORef depsVar $ \deps'' -> (HashMap.delete threadId deps'', ())
+                    maybe (rules' key) return maybeValue
+                  )
+
+            Done value ->
+              return value
+
+    detectCycle threadId deps =
+      go threadId
+      where
+        go tid =
+          case HashMap.lookup tid deps of
+            Nothing -> False
+            Just dep
+              | dep == threadId -> True
+              | otherwise -> go dep
 
 -- | Remember the results of previous @f@ queries and what their dependencies
 -- were then.
