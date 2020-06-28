@@ -2,7 +2,7 @@
 
 - Add `memoiseWithCycleDetection` and `Cycle`, enabling cycle detection
 - Implement `Task` using `ReaderT`, improving performance
-- Make buildable with GHC 8.0.2 through 8.8.3
+- Make buildable with GHC 8.2.2 through 8.8.3
 - Switch from the `dependent-map` package to the `dependent-hashmap` for caches
 - Remove support for Haxl-style automatic parallelisation
   * Remove strategy parameter from `runTask`
