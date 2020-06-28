@@ -1,5 +1,7 @@
 # Unreleased
 
+# 0.3.0.0
+
 - Add `memoiseWithCycleDetection` and `Cycle`, enabling cycle detection
 - Implement `Task` using `ReaderT`, improving performance
 - Make buildable with GHC 8.2.2 through 8.8.3
