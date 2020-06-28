@@ -10,7 +10,7 @@ license:             BSD3
 license-file:        LICENSE
 author:              Olle Fredriksson
 maintainer:          fredriksson.olle@gmail.com
-copyright:           2018-2019 Olle Fredriksson
+copyright:           2018-2020 Olle Fredriksson
 category:            Development
 build-type:          Simple
 extra-source-files:
