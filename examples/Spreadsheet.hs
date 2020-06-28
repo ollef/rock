@@ -1,12 +1,13 @@
+{-# language FlexibleInstances #-}
 {-# language GADTs #-}
-{-# language NoImplicitPrelude #-}
-{-# language OverloadedStrings #-}
 {-# language StandaloneDeriving #-}
 {-# language TemplateHaskell #-}
 
-import Protolude
-
-import Data.GADT.Compare.TH (deriveGEq, deriveGCompare)
+import Control.Monad.IO.Class
+import Data.GADT.Compare.TH (deriveGEq)
+import Data.Hashable
+import Data.Some
+import Data.IORef
 import qualified Rock
 
 data Query a where
@@ -16,13 +17,22 @@ data Query a where
   D :: Query Integer
 
 deriving instance Show (Query a)
-
 deriveGEq ''Query
-deriveGCompare ''Query
+
+instance Hashable (Query a) where
+  hashWithSalt salt query =
+    case query of
+      A -> hashWithSalt salt (0 :: Int)
+      B -> hashWithSalt salt (1 :: Int)
+      C -> hashWithSalt salt (2 :: Int)
+      D -> hashWithSalt salt (3 :: Int)
+
+instance Hashable (Some Query) where
+  hashWithSalt salt (Some query) = hashWithSalt salt query
 
 rules :: Rock.Rules Query
 rules key = do
-  putText $ "Fetching " <> show key
+  liftIO $ putStrLn $ "Fetching " <> show key
   case key of
     A -> pure 10
     B -> do
@@ -37,24 +47,11 @@ rules key = do
 main :: IO ()
 main = do
   do
-    putText "Running"
-    result <- Rock.runTask Rock.sequentially rules (Rock.fetch D)
+    liftIO $ putStrLn "Running"
+    result <- Rock.runTask rules (Rock.fetch D)
     print result
   do
-    putText "Running with memoisation"
-    memoVar <- newMVar mempty
-    result <-
-      Rock.runTask
-        Rock.sequentially
-        (Rock.memoise memoVar rules)
-        (Rock.fetch D)
-    print result
-  do
-    putText "Running with memoisation using the parallel strategy"
-    memoVar <- newMVar mempty
-    result <-
-      Rock.runTask
-        Rock.inParallel
-        (Rock.memoise memoVar rules)
-        (Rock.fetch D)
-    print result
+    liftIO $ putStrLn "Running with memoisation"
+    memoVar <- newIORef mempty
+    result <- Rock.runTask (Rock.memoise memoVar rules) (Rock.fetch D)
+    liftIO $ print result
