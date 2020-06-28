@@ -25,6 +25,7 @@ import Data.List
 import Data.Semigroup
 #endif
 import Data.Some
+import Data.Type.Equality ((:~:)(Refl))
 import Hedgehog
 import qualified Hedgehog.Gen as Gen
 import qualified Hedgehog.Range as Range
