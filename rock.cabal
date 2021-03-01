@@ -1,5 +1,5 @@
 name:                rock
-version:             0.3.0.0
+version:             0.3.1.0
 synopsis:            A build system for incremental, parallel, and demand-driven computations
 description:         See <https://www.github.com/ollef/rock> for more
                      information and

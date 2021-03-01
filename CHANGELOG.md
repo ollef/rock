@@ -1,5 +1,7 @@
 # Unreleased
 
+# 0.3.1.0
+
 - Add `MonadFix` instance to `Task`
 
 # 0.3.0.0
