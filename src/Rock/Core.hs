@@ -67,7 +67,7 @@ type GenRules f g = forall a. f a -> Task g a
 -- method from its 'MonadFetch' instance.
 newtype Task f a = Task { unTask :: ReaderT (Fetch f) IO a }
   deriving
-    (Functor, Applicative, Monad, MonadIO, MonadBase IO)
+    (Functor, Applicative, Monad, MonadIO, MonadBase IO, MonadFix)
 
 newtype Fetch f = Fetch (forall a. f a -> IO a)
 

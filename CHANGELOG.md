@@ -1,5 +1,7 @@
 # Unreleased
 
+- Add `MonadFix` instance to `Task`
+
 # 0.3.0.0
 
 - Add `memoiseWithCycleDetection` and `Cycle`, enabling cycle detection
