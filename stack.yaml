@@ -1,8 +1,5 @@
-resolver: lts-15.1
+resolver: lts-18.16
 packages:
 - .
 extra-deps:
-- dependent-hashmap-0.1.0.0
-- constraints-extras-0.3.0.2
-- dependent-sum-0.6.2.0
-- dependent-sum-template-0.1.0.3
+- dependent-hashmap-0.1.0.1
