@@ -12,8 +12,9 @@
 {-# language UndecidableInstances #-}
 module Rock.Core where
 
-import Control.Concurrent
+import Control.Concurrent.Lifted
 import Control.Exception.Lifted
+import Data.IORef.Lifted
 import Control.Monad.Base
 import Control.Monad.Cont
 import Control.Monad.Except
@@ -41,7 +42,6 @@ import Data.HashMap.Lazy (HashMap)
 import qualified Data.HashMap.Lazy as HashMap
 import Data.HashSet (HashSet)
 import qualified Data.HashSet as HashSet
-import Data.IORef
 import Data.Maybe
 import Data.Typeable
 #if !MIN_VERSION_base(4,11,0)
@@ -150,16 +150,16 @@ trackM
   -> Task f a
   -> Task f (a, DHashMap f g)
 trackM f task = do
-  depsVar <- liftIO $ newIORef mempty
+  depsVar <- newIORef mempty
   let
     record :: f b -> Task f b
     record key = do
       value <- fetch key
       g <- f key value
-      liftIO $ atomicModifyIORef depsVar $ (, ()) . DHashMap.insert key g
+      atomicModifyIORef depsVar $ (, ()) . DHashMap.insert key g
       return value
   result <- transFetch record task
-  deps <- liftIO $ readIORef depsVar
+  deps <- readIORef depsVar
   return (result, deps)
 
 -- | Remember what @f@ queries have already been performed and their results in
@@ -174,25 +174,25 @@ memoise
   -> GenRules f g
   -> GenRules f g
 memoise startedVar rules (key :: f a) = do
-  maybeValueVar <- DHashMap.lookup key <$> liftIO (readIORef startedVar)
+  maybeValueVar <- DHashMap.lookup key <$> readIORef startedVar
   case maybeValueVar of
     Nothing -> do
-      valueVar <- liftIO newEmptyMVar
-      join $ liftIO $ atomicModifyIORef startedVar $ \started ->
+      valueVar <- newEmptyMVar
+      join $ atomicModifyIORef startedVar $ \started ->
         case DHashMap.alterLookup (Just . fromMaybe valueVar) key started of
           (Nothing, started') ->
             ( started'
             , do
               value <- rules key
-              liftIO $ putMVar valueVar value
+              putMVar valueVar value
               return value
             )
 
           (Just valueVar', _started') ->
-            (started, liftIO $ readMVar valueVar')
+            (started, readMVar valueVar')
 
     Just valueVar ->
-      liftIO $ readMVar valueVar
+      readMVar valueVar
 
 newtype Cyclic f = Cyclic (Some f)
   deriving Show
@@ -297,7 +297,7 @@ verifyTraces
   -> GenRules (Writer TaskKind f) f
   -> Rules f
 verifyTraces tracesVar createDependencyRecord rules key = do
-  traces <- liftIO $ readIORef tracesVar
+  traces <- readIORef tracesVar
   maybeValue <- case DHashMap.lookup key traces of
     Nothing -> return Nothing
     Just oldValueDeps ->
@@ -310,7 +310,7 @@ verifyTraces tracesVar createDependencyRecord rules key = do
         Input ->
           return ()
         NonInput ->
-          liftIO $ atomicModifyIORef tracesVar
+          atomicModifyIORef tracesVar
             $ (, ()) . Traces.record key value deps
       return value
     Just value -> return value
@@ -375,7 +375,7 @@ trackReverseDependencies reverseDepsVar rules key = do
           [ (Some depKey, HashSet.singleton $ Some key)
           | depKey :=> Const () <- DHashMap.toList deps
           ]
-    liftIO $ atomicModifyIORef reverseDepsVar $ (, ()) . HashMap.unionWith (<>) newReverseDeps
+    atomicModifyIORef reverseDepsVar $ (, ()) . HashMap.unionWith (<>) newReverseDeps
   pure res
 
 -- | @'reachableReverseDependencies' key@ returns all keys reachable, by
