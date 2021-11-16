@@ -20,7 +20,7 @@ import Data.GADT.Compare
 import Data.GADT.Show
 import Data.Hashable
 import Data.IORef
-import Data.List
+import Data.List (sort)
 #if !MIN_VERSION_base(4,11,0)
 import Data.Semigroup
 #endif
