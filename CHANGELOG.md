@@ -1,5 +1,9 @@
 # Unreleased
 
+# 0.3.1.1
+
+- Fix a concurrency bug in `memoiseWithCycleDetection`, where a race condition meant that it could sometimes throw a `Cyclic` exception when there weren't actually cycles
+
 # 0.3.1.0
 
 - Add `MonadFix` instance to `Task`
