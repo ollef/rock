@@ -88,7 +88,7 @@ Fetching C
 ```
 
 Note: Besides pure computations as shown above, the `Task` data type implements
-`MonadIO`, so you can run lift IO actions into the `Task` monad by using
+`MonadIO`, so you can lift IO actions into the `Task` monad by using
 `liftIO`!
 
 ## Query parameters
