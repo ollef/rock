@@ -87,6 +87,10 @@ Fetching C
 70
 ```
 
+Note: Besides pure computations as shown above, the `Task` data type implements
+`MonadIO`, so you can run lift IO actions into the `Task` monad by using
+`liftIO`!
+
 ## Query parameters
 
 If you need to parametrize your queries (e.g. typechecking one specific file),
