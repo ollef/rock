@@ -2,11 +2,12 @@
 
 A build system inspired by [Build systems à la carte](https://www.microsoft.com/en-us/research/publication/build-systems-la-carte/).
 
-Used in [Sixten](https://github.com/ollef/sixten) and
-[Sixty](https://github.com/ollef/sixty) to achieve incremental and query driven
-compiler architectures.
+Used in [Sixten](https://github.com/ollef/sixten),
+[Sixty](https://github.com/ollef/sixty) and
+[Eclair](https://github.com/luc-tielen/eclair-lang) to achieve incremental and
+query driven compiler architectures.
 
-# Example
+## Example
 
 ```haskell
 {-# language FlexibleInstances #-}
@@ -86,11 +87,30 @@ Fetching C
 70
 ```
 
-# Related projects
+## Query parameters
+
+If you need to parametrize your queries (e.g. typechecking one specific file),
+you can do this by adding additional arguments to your `Query` datatype:
+
+```haskell
+data Query a where
+  Parse :: FilePath -> Query AST
+  Typecheck :: FilePath -> Query (Either TypeError TypedAST)
+
+rules :: Rock.Rules Query
+rules key = case key of
+  Parse file -> do
+    _ -- parse the file..
+  Typecheck file -> do
+    ast <- Rock.fetch (Parse file)
+    _ -- typecheck file..
+```
+
+## Related projects
 
 * [Shake](http://hackage.haskell.org/package/shake)
 * [Salsa](https://crates.io/crates/salsa)
 
-# Contributions
+## Contributions
 
 ... are very welcome, especially in the areas of documentation and examples.
