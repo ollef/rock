@@ -49,8 +49,6 @@ instance Hashable (Some Key) where
       IntKey i -> hashWithSalt salt (0 :: Int, i)
       StringKey s -> hashWithSalt salt (1 :: Int, s)
 
-deriveArgDict ''Key
-
 instance GEq Key where
   geq (IntKey i1) (IntKey i2)
     | i1 == i2 =
@@ -80,6 +78,8 @@ instance GCompare Key where
       GLT
     | otherwise =
       GGT
+
+deriveArgDict ''Key
 
 int :: Gen Int
 int = Gen.int (Range.linear 0 100)
