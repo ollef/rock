@@ -9,15 +9,18 @@
 {-# language ScopedTypeVariables #-}
 {-# language TupleSections #-}
 {-# language TypeFamilies #-}
+{-# language TypeOperators #-}
 {-# language UndecidableInstances #-}
 module Rock.Core where
 
 import Control.Concurrent.Lifted
 import Control.Exception.Lifted
 import Data.IORef.Lifted
+import Control.Monad
 import Control.Monad.Base
 import Control.Monad.Cont
 import Control.Monad.Except
+import Control.Monad.Fix
 import Control.Monad.Identity
 import Control.Monad.Reader
 import qualified Control.Monad.RWS.Lazy as Lazy
