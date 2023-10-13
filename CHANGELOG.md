@@ -1,5 +1,13 @@
 # Unreleased
 
+# 0.3.1.2
+
+- Add docs about query params, mention Eclair in README
+- Add note about IO actions
+- Fix template stages to build with GHC 9.2.2
+- Fix build errors with GHC 9.6.2
+- Add CI in GitHub Actions Workflow
+
 # 0.3.1.1
 
 - Fix a concurrency bug in `memoiseWithCycleDetection`, where a race condition meant that it could sometimes throw a `Cyclic` exception when there weren't actually cycles
