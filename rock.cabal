@@ -1,5 +1,5 @@
 name:                rock
-version:             0.3.1.1
+version:             0.3.1.2
 synopsis:            A build system for incremental, parallel, and demand-driven computations
 description:         See <https://www.github.com/ollef/rock> for more
                      information and
@@ -10,7 +10,7 @@ license:             BSD3
 license-file:        LICENSE
 author:              Olle Fredriksson
 maintainer:          fredriksson.olle@gmail.com
-copyright:           2018-2021 Olle Fredriksson
+copyright:           2018-2023 Olle Fredriksson
 category:            Development
 build-type:          Simple
 extra-source-files:
@@ -21,6 +21,9 @@ tested-with:         GHC == 8.2.2
                    , GHC == 8.4.3
                    , GHC == 8.6.5
                    , GHC == 8.8.3
+                   , GHC == 9.2.2
+                   , GHC == 9.4.4
+                   , GHC == 9.6.2
 
 library
   ghc-options:         -Wall
@@ -39,17 +42,17 @@ library
                        Rock.Core
                        Rock.Traces
   build-depends:       base >= 4.7 && < 5
-                     , constraints-extras >= 0.3
-                     , dependent-hashmap >= 0.1
-                     , dependent-sum >= 0.6
-                     , deriving-compat >= 0.5
-                     , hashable >= 1.3
-                     , lifted-base >= 0.2
-                     , monad-control >= 1.0
-                     , mtl >= 2.2
-                     , transformers >= 0.5
-                     , transformers-base >= 0.4
-                     , unordered-containers >= 0.2
+                     , constraints-extras >= 0.4.0 && < 0.5
+                     , dependent-hashmap >= 0.1.0 && < 0.2
+                     , dependent-sum >= 0.7.2 && < 0.8
+                     , deriving-compat >= 0.6.5 && < 0.7
+                     , hashable >= 1.4.3 && < 1.5
+                     , lifted-base >= 0.2.3 && < 0.3
+                     , monad-control >= 1.0.3 && < 1.1
+                     , mtl >= 2.3.1 && < 2.4
+                     , transformers >= 0.6.1 && < 0.7
+                     , transformers-base >= 0.4.6 && < 0.5
+                     , unordered-containers >= 0.2.19 && < 0.3
   default-language:    Haskell2010
   default-extensions:  OverloadedStrings
 
